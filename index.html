@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Weekly Goals</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Libre+Franklin:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #E8E4DA;
+    --surface: #F4F2EB;
+    --ink: #23241F;
+    --ink-soft: #6B6858;
+    --line: #CFC8B6;
+    --weekday: #33517A;
+    --weekday-soft: #DCE3EC;
+    --weekend: #B5622A;
+    --weekend-soft: #F0E0D2;
+    --done: #4B7355;
+  }
+  *{ box-sizing: border-box; }
+  @media (prefers-reduced-motion: reduce){
+    *{ transition: none !important; animation: none !important; }
+  }
+  body{
+    margin:0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Libre Franklin', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app{
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 20px 18px 40px;
+  }
+  .header{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    margin-bottom: 4px;
+  }
+  .nav-btn{
+    background:none;
+    border:none;
+    color: var(--ink-soft);
+    font-size: 20px;
+    line-height: 1;
+    padding: 6px 8px;
+    cursor:pointer;
+    border-radius: 4px;
+  }
+  .nav-btn:hover{ color: var(--ink); }
+  .nav-btn:focus-visible{ outline: 2px solid var(--ink); outline-offset: 2px; }
+  .week-label{
+    font-family: 'Fraunces', serif;
+    font-size: 27px;
+    font-weight: 500;
+    font-optical-sizing: auto;
+    text-align:center;
+    flex: 1;
+  }
+  .week-sub{
+    text-align:center;
+    color: var(--ink-soft);
+    font-size: 13px;
+    margin-bottom: 22px;
+  }
+  .tabs{
+    display:flex;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 20px;
+  }
+  .tab{
+    flex:1;
+    background:none;
+    border:none;
+    padding: 10px 4px 12px;
+    cursor:pointer;
+    font-family: 'Libre Franklin', sans-serif;
+    text-align:center;
+    color: var(--ink-soft);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .tab .t-name{ font-size:15px; font-weight:600; display:block; }
+  .tab .t-count{ font-size:12px; margin-top:2px; display:block; }
+  .tab.active{ color: var(--ink); }
+  .tab[data-tab="weekday"].active{ border-color: var(--weekday); }
+  .tab[data-tab="weekend"].active{ border-color: var(--weekend); }
+  .tab:focus-visible{ outline: 2px solid var(--ink); outline-offset: -2px; }
+
+  .progress-track{
+    height: 3px;
+    background: var(--line);
+    border-radius: 2px;
+    margin-bottom: 22px;
+    overflow:hidden;
+  }
+  .progress-fill{
+    height:100%;
+    width:0%;
+    transition: width .35s ease;
+  }
+  .progress-fill.weekday{ background: var(--weekday); }
+  .progress-fill.weekend{ background: var(--weekend); }
+
+  .copy-banner{
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    margin-bottom: 18px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 10px;
+  }
+  .copy-banner button{
+    background: var(--ink);
+    color: var(--surface);
+    border:none;
+    border-radius: 4px;
+    padding: 7px 12px;
+    font-size: 13px;
+    font-weight:600;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+
+  .category-group{ margin-bottom: 18px; }
+  .category-name{
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-soft);
+    margin-bottom: 6px;
+  }
+  .goal-row{
+    display:flex;
+    align-items:flex-start;
+    gap: 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .goal-check{
+    width: 18px;
+    height: 18px;
+    border: 1.5px solid var(--ink-soft);
+    border-radius: 3px;
+    flex-shrink:0;
+    margin-top: 2px;
+    cursor:pointer;
+    background: none;
+    padding:0;
+    position:relative;
+  }
+  .goal-check.checked{ background: var(--done); border-color: var(--done); }
+  .goal-check.checked::after{
+    content:"";
+    position:absolute;
+    left:4px; top:1px;
+    width:5px; height:9px;
+    border: solid var(--surface);
+    border-width: 0 2px 2px 0;
+    transform: rotate(40deg);
+  }
+  .goal-text{
+    flex:1;
+    font-size: 15px;
+    line-height:1.4;
+    cursor:pointer;
+  }
+  .goal-text.done{
+    color: var(--ink-soft);
+    text-decoration: line-through;
+    text-decoration-color: var(--ink-soft);
+  }
+  .goal-del{
+    background:none;
+    border:none;
+    color: var(--ink-soft);
+    font-size: 15px;
+    cursor:pointer;
+    padding: 2px 6px;
+    line-height:1;
+  }
+  .goal-del:hover{ color: var(--ink); }
+
+  .empty-state{
+    color: var(--ink-soft);
+    font-size: 14.5px;
+    line-height:1.5;
+    padding: 10px 0 24px;
+  }
+
+  .add-form{
+    margin-top: 10px;
+    border-top: 1px solid var(--line);
+    padding-top: 16px;
+  }
+  .add-input{
+    width:100%;
+    font-family: 'Libre Franklin', sans-serif;
+    font-size: 15px;
+    padding: 10px 2px;
+    border: none;
+    border-bottom: 1.5px solid var(--line);
+    background: none;
+    color: var(--ink);
+    margin-bottom: 12px;
+  }
+  .add-input:focus{
+    outline:none;
+    border-bottom-color: var(--ink);
+  }
+  .chip-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .chip{
+    border: 1.5px solid var(--line);
+    background: none;
+    border-radius: 20px;
+    padding: 6px 13px;
+    font-size: 13px;
+    color: var(--ink-soft);
+    cursor:pointer;
+    font-family: 'Libre Franklin', sans-serif;
+  }
+  .chip.selected.weekday{ background: var(--weekday-soft); border-color: var(--weekday); color: var(--weekday); }
+  .chip.selected.weekend{ background: var(--weekend-soft); border-color: var(--weekend); color: var(--weekend); }
+  .chip-new-input{
+    border: 1.5px solid var(--ink-soft);
+    border-radius: 20px;
+    padding: 6px 13px;
+    font-size: 13px;
+    font-family: 'Libre Franklin', sans-serif;
+    background:none;
+    color: var(--ink);
+    width: 110px;
+  }
+  .chip-new-input:focus{ outline:none; }
+  .add-submit{
+    width:100%;
+    border:none;
+    border-radius: 6px;
+    padding: 11px;
+    font-size: 14.5px;
+    font-weight: 600;
+    cursor:pointer;
+    color: var(--surface);
+    font-family: 'Libre Franklin', sans-serif;
+  }
+  .add-submit.weekday{ background: var(--weekday); }
+  .add-submit.weekend{ background: var(--weekend); }
+  .add-submit:disabled{ background: var(--line); cursor:default; }
+
+  .loading{
+    text-align:center;
+    color: var(--ink-soft);
+    padding: 60px 0;
+    font-size: 14px;
+  }
+  .status-note{
+    text-align:center;
+    color: var(--ink-soft);
+    font-size: 12px;
+    margin-top: 24px;
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <div class="loading" id="loading">Loading your week…</div>
+</div>
+
+<script>
+(function(){
+  // Outside Claude, window.storage doesn't exist — fall back to localStorage
+  // so this same file works as a standalone, self-hosted app.
+  if (!window.storage){
+    const LS_PREFIX = 'goals-tracker::';
+    window.storage = {
+      async get(key){
+        const raw = localStorage.getItem(LS_PREFIX + key);
+        if (raw === null) throw new Error('Key not found: ' + key);
+        return { key, value: raw, shared: false };
+      },
+      async set(key, value){
+        localStorage.setItem(LS_PREFIX + key, value);
+        return { key, value, shared: false };
+      },
+      async delete(key){
+        const existed = localStorage.getItem(LS_PREFIX + key) !== null;
+        localStorage.removeItem(LS_PREFIX + key);
+        return { key, deleted: existed, shared: false };
+      },
+      async list(prefix){
+        const keys = [];
+        for (let i=0;i<localStorage.length;i++){
+          const k = localStorage.key(i);
+          if (k && k.startsWith(LS_PREFIX)){
+            const short = k.slice(LS_PREFIX.length);
+            if (!prefix || short.startsWith(prefix)) keys.push(short);
+          }
+        }
+        return { keys, prefix, shared: false };
+      }
+    };
+  }
+
+  const CATEGORY_DEFAULTS = ['Work','Fitness','Personal'];
+
+  function getMonday(d){
+    const date = new Date(d);
+    const day = date.getDay();
+    const diff = (day === 0 ? -6 : 1 - day);
+    date.setDate(date.getDate() + diff);
+    date.setHours(0,0,0,0);
+    return date;
+  }
+  function isoDate(d){
+    const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${day}`;
+  }
+  function fmtWeekLabel(monday){
+    const opts = {month:'short', day:'numeric'};
+    const sunday = new Date(monday); sunday.setDate(sunday.getDate()+6);
+    return `${monday.toLocaleDateString('en-US',opts)} – ${sunday.toLocaleDateString('en-US',opts)}`;
+  }
+  function defaultTab(now){
+    const day = now.getDay(); // 0 Sun..6 Sat
+    const hour = now.getHours();
+    if (day === 5 && hour >= 18) return 'weekend';
+    if (day === 6 || day === 0) return 'weekend';
+    return 'weekday';
+  }
+  function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+  const state = {
+    today: new Date(),
+    monday: null,
+    activeTab: null,
+    week: { weekday: [], weekend: [] },
+    prevWeek: null,
+    categories: CATEGORY_DEFAULTS.slice(),
+    selectedCategory: CATEGORY_DEFAULTS[0],
+    addingCategory: false,
+    ready: false
+  };
+  state.monday = getMonday(state.today);
+  state.activeTab = defaultTab(state.today);
+
+  const app = document.getElementById('app');
+
+  async function weekKey(monday){ return 'goals-week:' + isoDate(monday); }
+
+  async function loadWeek(monday){
+    try{
+      const res = await window.storage.get(await weekKey(monday), false);
+      if (res && res.value){
+        const parsed = JSON.parse(res.value);
+        return { weekday: parsed.weekday || [], weekend: parsed.weekend || [] };
+      }
+    }catch(e){ /* no data for this week yet */ }
+    return { weekday: [], weekend: [] };
+  }
+
+  async function saveWeek(){
+    try{
+      await window.storage.set(await weekKey(state.monday), JSON.stringify(state.week), false);
+    }catch(e){ console.error('Storage error saving week', e); }
+  }
+
+  async function loadCategories(){
+    try{
+      const res = await window.storage.get('goals-categories', false);
+      if (res && res.value){
+        const arr = JSON.parse(res.value);
+        if (Array.isArray(arr) && arr.length) return arr;
+      }
+    }catch(e){ /* use defaults */ }
+    return CATEGORY_DEFAULTS.slice();
+  }
+
+  async function saveCategories(){
+    try{
+      await window.storage.set('goals-categories', JSON.stringify(state.categories), false);
+    }catch(e){ console.error('Storage error saving categories', e); }
+  }
+
+  async function init(){
+    const [week, categories] = await Promise.all([
+      loadWeek(state.monday),
+      loadCategories()
+    ]);
+    state.week = week;
+    state.categories = categories;
+    state.selectedCategory = categories[0];
+
+    const prevMonday = new Date(state.monday); prevMonday.setDate(prevMonday.getDate()-7);
+    if (week.weekday.length === 0 && week.weekend.length === 0){
+      state.prevWeek = await loadWeek(prevMonday);
+      if (state.prevWeek.weekday.length === 0 && state.prevWeek.weekend.length === 0) state.prevWeek = null;
+    }
+
+    state.ready = true;
+    render();
+  }
+
+  async function goToWeek(offsetDays){
+    state.monday = new Date(state.monday.getTime());
+    state.monday.setDate(state.monday.getDate() + offsetDays);
+    state.week = await loadWeek(state.monday);
+    state.prevWeek = null;
+    if (state.week.weekday.length === 0 && state.week.weekend.length === 0){
+      const prevMonday = new Date(state.monday); prevMonday.setDate(prevMonday.getDate()-7);
+      const pw = await loadWeek(prevMonday);
+      if (pw.weekday.length > 0 || pw.weekend.length > 0) state.prevWeek = pw;
+    }
+    render();
+  }
+
+  async function copyPrevWeek(){
+    if (!state.prevWeek) return;
+    state.week = {
+      weekday: state.prevWeek.weekday.map(g => ({ ...g, id: uid(), done: false })),
+      weekend: state.prevWeek.weekend.map(g => ({ ...g, id: uid(), done: false }))
+    };
+    state.prevWeek = null;
+    await saveWeek();
+    render();
+  }
+
+  async function addGoal(text){
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    state.week[state.activeTab].push({
+      id: uid(), text: trimmed, category: state.selectedCategory, done: false
+    });
+    await saveWeek();
+    render();
+  }
+
+  async function toggleGoal(id){
+    const list = state.week[state.activeTab];
+    const g = list.find(x => x.id === id);
+    if (g){ g.done = !g.done; await saveWeek(); render(); }
+  }
+
+  async function deleteGoal(id){
+    state.week[state.activeTab] = state.week[state.activeTab].filter(x => x.id !== id);
+    await saveWeek();
+    render();
+  }
+
+  async function addCategory(name){
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (!state.categories.includes(trimmed)) state.categories.push(trimmed);
+    state.selectedCategory = trimmed;
+    state.addingCategory = false;
+    await saveCategories();
+    render();
+  }
+
+  function groupByCategory(list){
+    const groups = {};
+    const order = [];
+    list.forEach(g => {
+      if (!groups[g.category]){ groups[g.category] = []; order.push(g.category); }
+      groups[g.category].push(g);
+    });
+    return order.map(cat => ({ category: cat, goals: groups[cat] }));
+  }
+
+  function render(){
+    if (!state.ready){
+      app.innerHTML = '<div class="loading">Loading your week…</div>';
+      return;
+    }
+    const isWeekday = state.activeTab === 'weekday';
+    const list = state.week[state.activeTab];
+    const done = list.filter(g => g.done).length;
+    const total = list.length;
+    const pct = total ? Math.round((done/total)*100) : 0;
+
+    const wdDone = state.week.weekday.filter(g=>g.done).length, wdTotal = state.week.weekday.length;
+    const weDone = state.week.weekend.filter(g=>g.done).length, weTotal = state.week.weekend.length;
+
+    let html = '';
+    html += `<div class="header">
+      <button class="nav-btn" id="prevWeek" aria-label="Previous week">‹</button>
+      <div class="week-label">${fmtWeekLabel(state.monday)}</div>
+      <button class="nav-btn" id="nextWeek" aria-label="Next week">›</button>
+    </div>`;
+    html += `<div class="week-sub">Weekday runs Mon–Fri afternoon · Weekend runs Fri night–Sun night</div>`;
+
+    html += `<div class="tabs">
+      <button class="tab ${isWeekday?'active':''}" data-tab="weekday">
+        <span class="t-name">Weekday</span>
+        <span class="t-count">${wdDone}/${wdTotal} done</span>
+      </button>
+      <button class="tab ${!isWeekday?'active':''}" data-tab="weekend">
+        <span class="t-name">Weekend</span>
+        <span class="t-count">${weDone}/${weTotal} done</span>
+      </button>
+    </div>`;
+
+    html += `<div class="progress-track"><div class="progress-fill ${state.activeTab}" style="width:${pct}%"></div></div>`;
+
+    if (state.prevWeek){
+      html += `<div class="copy-banner">
+        <span>Bring over last week's goals?</span>
+        <button id="copyPrev">Copy them in</button>
+      </div>`;
+    }
+
+    if (total === 0){
+      html += `<div class="empty-state">${isWeekday
+        ? "No weekday goals yet — add what you want to get done Monday to Friday afternoon."
+        : "No weekend goals yet — add what this weekend is for."}</div>`;
+    } else {
+      const groups = groupByCategory(list);
+      groups.forEach(group => {
+        html += `<div class="category-group">
+          <div class="category-name">${escapeHtml(group.category)}</div>`;
+        group.goals.forEach(g => {
+          html += `<div class="goal-row">
+            <button class="goal-check ${g.done?'checked':''}" data-id="${g.id}" aria-label="${g.done?'Mark not done':'Mark done'}"></button>
+            <span class="goal-text ${g.done?'done':''}" data-id="${g.id}">${escapeHtml(g.text)}</span>
+            <button class="goal-del" data-id="${g.id}" aria-label="Delete goal">✕</button>
+          </div>`;
+        });
+        html += `</div>`;
+      });
+    }
+
+    html += `<div class="add-form">
+      <input class="add-input" id="goalInput" type="text" placeholder="What do you want to get done?" maxlength="140" />
+      <div class="chip-row" id="chipRow"></div>
+      <button class="add-submit ${state.activeTab}" id="addBtn">Add to ${isWeekday?'weekday':'weekend'}</button>
+    </div>`;
+
+    html += `<div class="status-note">Kept on this device.</div>`;
+
+    app.innerHTML = html;
+    renderChips();
+    attachHandlers();
+  }
+
+  function renderChips(){
+    const chipRow = document.getElementById('chipRow');
+    let html = '';
+    state.categories.forEach(cat => {
+      const sel = cat === state.selectedCategory && !state.addingCategory;
+      html += `<button class="chip ${sel?'selected '+state.activeTab:''}" data-cat="${escapeHtml(cat)}">${escapeHtml(cat)}</button>`;
+    });
+    if (state.addingCategory){
+      html += `<input class="chip-new-input" id="newCatInput" type="text" placeholder="Category name" maxlength="24" autofocus />`;
+    } else {
+      html += `<button class="chip" id="newCatChip">+ New</button>`;
+    }
+    chipRow.innerHTML = html;
+
+    chipRow.querySelectorAll('.chip[data-cat]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.selectedCategory = btn.getAttribute('data-cat');
+        state.addingCategory = false;
+        render();
+      });
+    });
+    const newChip = document.getElementById('newCatChip');
+    if (newChip) newChip.addEventListener('click', () => {
+      state.addingCategory = true;
+      render();
+      setTimeout(() => document.getElementById('newCatInput').focus(), 0);
+    });
+    const newInput = document.getElementById('newCatInput');
+    if (newInput){
+      newInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter'){ addCategory(newInput.value); }
+        if (e.key === 'Escape'){ state.addingCategory = false; render(); }
+      });
+      newInput.addEventListener('blur', () => {
+        if (newInput.value.trim()) addCategory(newInput.value);
+        else { state.addingCategory = false; render(); }
+      });
+    }
+  }
+
+  function attachHandlers(){
+    document.getElementById('prevWeek').addEventListener('click', () => goToWeek(-7));
+    document.getElementById('nextWeek').addEventListener('click', () => goToWeek(7));
+
+    document.querySelectorAll('.tab').forEach(t => {
+      t.addEventListener('click', () => {
+        state.activeTab = t.getAttribute('data-tab');
+        state.selectedCategory = state.categories[0];
+        render();
+      });
+    });
+
+    const copyBtn = document.getElementById('copyPrev');
+    if (copyBtn) copyBtn.addEventListener('click', copyPrevWeek);
+
+    document.querySelectorAll('.goal-check, .goal-text').forEach(el => {
+      el.addEventListener('click', () => toggleGoal(el.getAttribute('data-id')));
+    });
+    document.querySelectorAll('.goal-del').forEach(el => {
+      el.addEventListener('click', () => deleteGoal(el.getAttribute('data-id')));
+    });
+
+    const input = document.getElementById('goalInput');
+    const addBtn = document.getElementById('addBtn');
+    addBtn.addEventListener('click', () => {
+      addGoal(input.value);
+      input.value = '';
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter'){ addGoal(input.value); input.value=''; }
+    });
+  }
+
+  function escapeHtml(str){
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

@@ -266,6 +266,42 @@
     padding: 60px 0;
     font-size: 14px;
   }
+  .signin{
+    text-align:center;
+    padding: 100px 20px;
+  }
+  .signin-title{
+    font-family: 'Fraunces', serif;
+    font-size: 28px;
+    margin-bottom: 8px;
+  }
+  .signin-sub{
+    color: var(--ink-soft);
+    font-size: 14px;
+    margin-bottom: 24px;
+  }
+  .signin-btn{
+    background: var(--ink);
+    color: var(--surface);
+    border: none;
+    border-radius: 10px;
+    padding: 12px 20px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: 'Libre Franklin', sans-serif;
+  }
+  .signout-link{
+    background:none;
+    border:none;
+    color: var(--ink-soft);
+    text-decoration: underline;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 0;
+    margin-left: 4px;
+    font-family: 'Libre Franklin', sans-serif;
+  }
   .status-note{
     text-align:center;
     color: var(--ink-soft);
@@ -279,40 +315,53 @@
   <div class="loading" id="loading">Loading your week…</div>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script>
 (function(){
-  // Outside Claude, window.storage doesn't exist — fall back to localStorage
-  // so this same file works as a standalone, self-hosted app.
-  if (!window.storage){
-    const LS_PREFIX = 'goals-tracker::';
-    window.storage = {
-      async get(key){
-        const raw = localStorage.getItem(LS_PREFIX + key);
-        if (raw === null) throw new Error('Key not found: ' + key);
-        return { key, value: raw, shared: false };
-      },
-      async set(key, value){
-        localStorage.setItem(LS_PREFIX + key, value);
-        return { key, value, shared: false };
-      },
-      async delete(key){
-        const existed = localStorage.getItem(LS_PREFIX + key) !== null;
-        localStorage.removeItem(LS_PREFIX + key);
-        return { key, deleted: existed, shared: false };
-      },
-      async list(prefix){
-        const keys = [];
-        for (let i=0;i<localStorage.length;i++){
-          const k = localStorage.key(i);
-          if (k && k.startsWith(LS_PREFIX)){
-            const short = k.slice(LS_PREFIX.length);
-            if (!prefix || short.startsWith(prefix)) keys.push(short);
-          }
-        }
-        return { keys, prefix, shared: false };
-      }
-    };
+  const firebaseConfig = {
+    apiKey: "AIzaSyC1WkzFKMbUjJhTSsDMQCS7hRYcvm4dCyw",
+    authDomain: "goals-tracker-3728e.firebaseapp.com",
+    projectId: "goals-tracker-3728e",
+    storageBucket: "goals-tracker-3728e.firebasestorage.app",
+    messagingSenderId: "641924780118",
+    appId: "1:641924780118:web:52d94e668eae0b61cf6bf7"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+
+  // Each signed-in user reads/writes only their own users/{uid}/kv/{key}
+  // documents — enforced server-side by the Firestore security rules, not
+  // by anything in this file.
+  function kv(key){
+    return db.collection('users').doc(auth.currentUser.uid).collection('kv').doc(key);
   }
+  window.storage = {
+    async get(key){
+      const doc = await kv(key).get();
+      if (!doc.exists) throw new Error('Key not found: ' + key);
+      return { key, value: doc.data().value, shared: false };
+    },
+    async set(key, value){
+      await kv(key).set({ value });
+      return { key, value, shared: false };
+    },
+    async delete(key){
+      const ref = kv(key);
+      const doc = await ref.get();
+      const existed = doc.exists;
+      await ref.delete();
+      return { key, deleted: existed, shared: false };
+    },
+    async list(prefix){
+      const snap = await db.collection('users').doc(auth.currentUser.uid).collection('kv').get();
+      const keys = [];
+      snap.forEach(d => { if (!prefix || d.id.startsWith(prefix)) keys.push(d.id); });
+      return { keys, prefix, shared: false };
+    }
+  };
 
   const CATEGORY_DEFAULTS = ['Work','Fitness','Personal'];
 
@@ -499,7 +548,7 @@
       <div class="week-label">${fmtWeekLabel(state.monday)}</div>
       <button class="nav-btn" id="nextWeek" aria-label="Next week">›</button>
     </div>`;
-    html += `<div class="week-sub">Weekday runs Mon–Fri afternoon · Weekend runs Fri night–Sun night</div>`;
+    html += `<div class="week-sub">Weekday runs Mon–Fri afternoon · Weekend runs Fri night–Sun night <button class="signout-link" id="signOutBtn">Sign out</button></div>`;
 
     html += `<div class="tabs">
       <button class="tab ${isWeekday?'active':''}" data-tab="weekday">
@@ -597,6 +646,7 @@
   function attachHandlers(){
     document.getElementById('prevWeek').addEventListener('click', () => goToWeek(-7));
     document.getElementById('nextWeek').addEventListener('click', () => goToWeek(7));
+    document.getElementById('signOutBtn').addEventListener('click', () => auth.signOut());
 
     document.querySelectorAll('.tab').forEach(t => {
       t.addEventListener('click', () => {
@@ -633,7 +683,22 @@
     return d.innerHTML;
   }
 
-  init();
+  function showSignIn(){
+    app.innerHTML = `<div class="signin">
+      <div class="signin-title">Weekly Goals</div>
+      <div class="signin-sub">Sign in to save your goals and sync them across devices.</div>
+      <button id="googleSignIn" class="signin-btn">Sign in with Google</button>
+    </div>`;
+    document.getElementById('googleSignIn').addEventListener('click', () => {
+      auth.signInWithPopup(new firebase.auth.GoogleAuthProvider())
+        .catch(e => alert('Sign-in failed: ' + e.message));
+    });
+  }
+
+  auth.onAuthStateChanged((user) => {
+    if (user) init();
+    else showSignIn();
+  });
 })();
 </script>
 </body>

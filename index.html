@@ -114,13 +114,27 @@
   .day-btn.active.weekend{ background: var(--weekend-soft); border-color: var(--weekend); color: var(--weekend); }
   .day-btn:focus-visible{ outline: 2px solid var(--ink); outline-offset: 2px; }
 
+  .progress-row{
+    display:flex;
+    align-items:center;
+    gap: 10px;
+    margin-bottom: 22px;
+  }
   .progress-track{
+    flex:1;
     height: 3px;
     background: var(--line);
     border-radius: 2px;
-    margin-bottom: 22px;
     overflow:hidden;
   }
+  .progress-pct{
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    min-width: 30px;
+    text-align:right;
+    font-variant-numeric: tabular-nums;
+  }
+  .progress-pct.all-done{ color: var(--done); font-weight:600; }
   .progress-fill{
     height:100%;
     width:0%;
@@ -397,7 +411,9 @@
     .day-btn .d-name{ font-size: 13.5px; }
     .day-btn .d-date{ font-size: 11px; }
     .day-btn .d-count{ font-size: 11.5px; }
-    .progress-track{ height: 4px; margin-bottom: 28px; }
+    .progress-row{ margin-bottom: 28px; }
+    .progress-track{ height: 4px; }
+    .progress-pct{ font-size: 12.5px; min-width: 34px; }
     .copy-banner{ background: var(--bg); font-size: 14.5px; padding: 14px 16px; }
     .category-name{ font-size: 14px; }
     .goal-row{ padding: 12px 0; gap: 12px; }
@@ -738,7 +754,10 @@
     });
     html += `</div>`;
 
-    html += `<div class="progress-track"><div class="progress-fill ${state.activeTab}" style="width:${pct}%"></div></div>`;
+    html += `<div class="progress-row">
+      <div class="progress-track"><div class="progress-fill ${state.activeTab}" style="width:${pct}%"></div></div>
+      <span class="progress-pct ${total && done===total ? 'all-done':''}">${total ? pct+'%' : '—'}</span>
+    </div>`;
 
     if (state.prevWeek){
       html += `<div class="copy-banner">

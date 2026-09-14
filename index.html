@@ -39,7 +39,7 @@
     display:flex;
     align-items:baseline;
     justify-content:space-between;
-    margin-bottom: 4px;
+    margin-bottom: 20px;
   }
   .nav-btn{
     background:none;
@@ -60,12 +60,6 @@
     font-optical-sizing: auto;
     text-align:center;
     flex: 1;
-  }
-  .week-sub{
-    text-align:center;
-    color: var(--ink-soft);
-    font-size: 13px;
-    margin-bottom: 22px;
   }
   .tabs{
     display:flex;
@@ -113,6 +107,7 @@
     white-space:nowrap;
   }
   .day-btn .d-name{ font-size: 12.5px; font-weight:600; }
+  .day-btn .d-date{ font-size: 10px; opacity: .8; }
   .day-btn .d-count{ font-size: 10.5px; }
   .day-btn .d-count.all-done{ color: var(--done); }
   .day-btn.active.weekday{ background: var(--weekday-soft); border-color: var(--weekday); color: var(--weekday); }
@@ -147,7 +142,8 @@
     justify-content:space-between;
     gap: 10px;
   }
-  .copy-banner button{
+  .copy-banner .copy-text{ flex:1; }
+  .copy-banner button#copyPrev{
     background: var(--ink);
     color: var(--surface);
     border:none;
@@ -157,7 +153,18 @@
     font-weight:600;
     cursor:pointer;
     white-space:nowrap;
+    font-family: 'Libre Franklin', sans-serif;
   }
+  .copy-dismiss{
+    background:none;
+    border:none;
+    color: var(--ink-soft);
+    font-size: 14px;
+    line-height:1;
+    padding: 4px 2px;
+    cursor:pointer;
+  }
+  .copy-dismiss:hover{ color: var(--ink); }
 
   .category-group{ margin-bottom: 18px; }
   .category-name{
@@ -206,7 +213,7 @@
     text-decoration: line-through;
     text-decoration-color: var(--ink-soft);
   }
-  .goal-del{
+  .goal-del, .goal-move{
     background:none;
     border:none;
     color: var(--ink-soft);
@@ -215,7 +222,29 @@
     padding: 2px 6px;
     line-height:1;
   }
-  .goal-del:hover{ color: var(--ink); }
+  .goal-del:hover, .goal-move:hover{ color: var(--ink); }
+  .goal-move.open{ color: var(--ink); }
+
+  .move-row{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    gap: 6px;
+    padding: 8px 0 10px 28px;
+  }
+  .move-label{ font-size: 12px; color: var(--ink-soft); }
+  .move-day{
+    border: 1px solid var(--line);
+    background:none;
+    border-radius: 14px;
+    padding: 4px 11px;
+    font-size: 12px;
+    color: var(--ink-soft);
+    cursor:pointer;
+    font-family: 'Libre Franklin', sans-serif;
+  }
+  .move-day:hover:not(:disabled){ border-color: var(--ink-soft); color: var(--ink); }
+  .move-day:disabled{ opacity: .35; cursor:default; }
 
   .empty-state{
     color: var(--ink-soft);
@@ -358,7 +387,7 @@
     }
     .nav-btn{ font-size: 22px; }
     .week-label{ font-size: 34px; }
-    .week-sub{ font-size: 14.5px; margin-bottom: 28px; }
+    .header{ margin-bottom: 26px; }
     .tabs{ margin-bottom: 24px; }
     .tab{ padding: 12px 4px 14px; }
     .tab .t-name{ font-size: 17px; }
@@ -366,6 +395,7 @@
     .day-row{ gap: 8px; margin-bottom: 22px; }
     .day-btn{ padding: 9px 4px; border-radius: 10px; }
     .day-btn .d-name{ font-size: 13.5px; }
+    .day-btn .d-date{ font-size: 11px; }
     .day-btn .d-count{ font-size: 11.5px; }
     .progress-track{ height: 4px; margin-bottom: 28px; }
     .copy-banner{ background: var(--bg); font-size: 14.5px; padding: 14px 16px; }
@@ -471,6 +501,16 @@
     weekday: ['Mon','Tue','Wed','Thu','Fri'],
     weekend: ['Fri night','Sat','Sun']
   };
+  const DAY_OFFSET = {
+    'Mon':0, 'Tue':1, 'Wed':2, 'Thu':3, 'Fri':4,
+    'Fri night':4, 'Sat':5, 'Sun':6
+  };
+
+  function dayDate(monday, day){
+    const d = new Date(monday);
+    d.setDate(d.getDate() + DAY_OFFSET[day]);
+    return d.toLocaleDateString('en-US', {month:'short', day:'numeric'});
+  }
 
   function defaultDay(now, tab){
     const d = now.getDay(); // 0 Sun..6 Sat
@@ -492,6 +532,7 @@
     categories: CATEGORY_DEFAULTS.slice(),
     selectedCategory: CATEGORY_DEFAULTS[0],
     selectedDay: { weekday: null, weekend: null },
+    movingGoalId: null,
     addingCategory: false,
     ready: false
   };
@@ -519,11 +560,12 @@
         const parsed = JSON.parse(res.value);
         return {
           weekday: withDays(parsed.weekday, 'weekday'),
-          weekend: withDays(parsed.weekend, 'weekend')
+          weekend: withDays(parsed.weekend, 'weekend'),
+          copyDismissed: !!parsed.copyDismissed
         };
       }
     }catch(e){ /* no data for this week yet */ }
-    return { weekday: [], weekend: [] };
+    return { weekday: [], weekend: [], copyDismissed: false };
   }
 
   async function saveWeek(){
@@ -559,7 +601,7 @@
     state.selectedCategory = categories[0];
 
     const prevMonday = new Date(state.monday); prevMonday.setDate(prevMonday.getDate()-7);
-    if (week.weekday.length === 0 && week.weekend.length === 0){
+    if (week.weekday.length === 0 && week.weekend.length === 0 && !week.copyDismissed){
       state.prevWeek = await loadWeek(prevMonday);
       if (state.prevWeek.weekday.length === 0 && state.prevWeek.weekend.length === 0) state.prevWeek = null;
     }
@@ -573,7 +615,7 @@
     state.monday.setDate(state.monday.getDate() + offsetDays);
     state.week = await loadWeek(state.monday);
     state.prevWeek = null;
-    if (state.week.weekday.length === 0 && state.week.weekend.length === 0){
+    if (state.week.weekday.length === 0 && state.week.weekend.length === 0 && !state.week.copyDismissed){
       const prevMonday = new Date(state.monday); prevMonday.setDate(prevMonday.getDate()-7);
       const pw = await loadWeek(prevMonday);
       if (pw.weekday.length > 0 || pw.weekend.length > 0) state.prevWeek = pw;
@@ -581,11 +623,19 @@
     render();
   }
 
+  async function dismissCopyBanner(){
+    state.week.copyDismissed = true;
+    state.prevWeek = null;
+    await saveWeek();
+    render();
+  }
+
   async function copyPrevWeek(){
     if (!state.prevWeek) return;
     state.week = {
       weekday: state.prevWeek.weekday.map(g => ({ ...g, id: uid(), done: false })),
-      weekend: state.prevWeek.weekend.map(g => ({ ...g, id: uid(), done: false }))
+      weekend: state.prevWeek.weekend.map(g => ({ ...g, id: uid(), done: false })),
+      copyDismissed: true
     };
     state.prevWeek = null;
     await saveWeek();
@@ -607,6 +657,14 @@
     const list = state.week[state.activeTab];
     const g = list.find(x => x.id === id);
     if (g){ g.done = !g.done; await saveWeek(); render(); }
+  }
+
+  async function moveGoal(id, targetDay){
+    const g = state.week[state.activeTab].find(x => x.id === id);
+    if (g) g.day = targetDay;
+    state.movingGoalId = null;
+    await saveWeek();
+    render();
   }
 
   async function deleteGoal(id){
@@ -656,8 +714,6 @@
       <div class="week-label">${fmtWeekLabel(state.monday)}</div>
       <button class="nav-btn" id="nextWeek" aria-label="Next week">›</button>
     </div>`;
-    html += `<div class="week-sub">Weekday runs Mon–Fri afternoon · Weekend runs Fri night–Sun night</div>`;
-
     html += `<div class="tabs">
       <button class="tab ${isWeekday?'active':''}" data-tab="weekday">
         <span class="t-name">Weekday</span>
@@ -676,6 +732,7 @@
       const allDone = dayGoals.length > 0 && dDone === dayGoals.length;
       html += `<button class="day-btn ${day===activeDay?'active '+state.activeTab:''}" data-day="${escapeHtml(day)}">
         <span class="d-name">${escapeHtml(day)}</span>
+        <span class="d-date">${dayDate(state.monday, day)}</span>
         <span class="d-count ${allDone?'all-done':''}">${dayGoals.length ? dDone+'/'+dayGoals.length : '—'}</span>
       </button>`;
     });
@@ -685,8 +742,9 @@
 
     if (state.prevWeek){
       html += `<div class="copy-banner">
-        <span>Bring over last week's goals?</span>
+        <span class="copy-text">Bring over last week's goals?</span>
         <button id="copyPrev">Copy them in</button>
+        <button class="copy-dismiss" id="dismissCopy" aria-label="Dismiss">✕</button>
       </div>`;
     }
 
@@ -701,8 +759,16 @@
           html += `<div class="goal-row">
             <button class="goal-check ${g.done?'checked':''}" data-id="${g.id}" aria-label="${g.done?'Mark not done':'Mark done'}"></button>
             <span class="goal-text ${g.done?'done':''}" data-id="${g.id}">${escapeHtml(g.text)}</span>
+            <button class="goal-move ${state.movingGoalId===g.id?'open':''}" data-id="${g.id}" aria-label="Move to another day">⇄</button>
             <button class="goal-del" data-id="${g.id}" aria-label="Delete goal">✕</button>
           </div>`;
+          if (state.movingGoalId === g.id){
+            html += `<div class="move-row"><span class="move-label">Move to</span>`;
+            DAYS[state.activeTab].forEach(d => {
+              html += `<button class="move-day" data-id="${g.id}" data-target="${escapeHtml(d)}" ${d===g.day?'disabled':''}>${escapeHtml(d)}</button>`;
+            });
+            html += `</div>`;
+          }
         });
         html += `</div>`;
       });
@@ -770,6 +836,7 @@
       t.addEventListener('click', () => {
         state.activeTab = t.getAttribute('data-tab');
         state.selectedCategory = state.categories[0];
+        state.movingGoalId = null;
         render();
       });
     });
@@ -777,12 +844,26 @@
     document.querySelectorAll('.day-btn').forEach(b => {
       b.addEventListener('click', () => {
         state.selectedDay[state.activeTab] = b.getAttribute('data-day');
+        state.movingGoalId = null;
         render();
       });
     });
 
     const copyBtn = document.getElementById('copyPrev');
     if (copyBtn) copyBtn.addEventListener('click', copyPrevWeek);
+    const dismissBtn = document.getElementById('dismissCopy');
+    if (dismissBtn) dismissBtn.addEventListener('click', dismissCopyBanner);
+
+    document.querySelectorAll('.goal-move').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = el.getAttribute('data-id');
+        state.movingGoalId = state.movingGoalId === id ? null : id;
+        render();
+      });
+    });
+    document.querySelectorAll('.move-day').forEach(el => {
+      el.addEventListener('click', () => moveGoal(el.getAttribute('data-id'), el.getAttribute('data-target')));
+    });
 
     document.querySelectorAll('.goal-check, .goal-text').forEach(el => {
       el.addEventListener('click', () => toggleGoal(el.getAttribute('data-id')));

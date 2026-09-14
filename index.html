@@ -206,6 +206,13 @@
     padding:0;
     position:relative;
   }
+  /* Visual box stays 18px, but the tap target extends into the surrounding
+     padding — 18px alone is too small to hit reliably on a phone. */
+  .goal-check::before{
+    content:"";
+    position:absolute;
+    top:-11px; bottom:-11px; left:-10px; right:-6px;
+  }
   .goal-check.checked{ background: var(--done); border-color: var(--done); }
   .goal-check.checked::after{
     content:"";
@@ -222,6 +229,22 @@
     line-height:1.4;
     cursor:pointer;
   }
+  .goal-edit-input{
+    flex:1;
+    font-family: 'Libre Franklin', sans-serif;
+    font-size: 15px;
+    line-height:1.4;
+    padding: 0;
+    border:none;
+    border-bottom: 1.5px solid var(--ink-soft);
+    background:none;
+    color: var(--ink);
+    min-width: 0;
+  }
+  .goal-edit-input:focus{ outline:none; border-bottom-color: var(--ink); }
+  .goal-list{ min-height: 4px; }
+  .sortable-ghost{ opacity: .35; }
+  .sortable-chosen .goal-row{ background: var(--bg); border-radius: 4px; }
   .goal-text.done{
     color: var(--ink-soft);
     text-decoration: line-through;
@@ -441,6 +464,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
 <script>
 (function(){
   const firebaseConfig = {
@@ -549,6 +573,7 @@
     selectedCategory: CATEGORY_DEFAULTS[0],
     selectedDay: { weekday: null, weekend: null },
     movingGoalId: null,
+    editingGoalId: null,
     addingCategory: false,
     ready: false
   };
@@ -675,6 +700,15 @@
     if (g){ g.done = !g.done; await saveWeek(); render(); }
   }
 
+  async function saveGoalText(id, text){
+    const trimmed = text.trim();
+    const g = state.week[state.activeTab].find(x => x.id === id);
+    if (g && trimmed) g.text = trimmed;
+    state.editingGoalId = null;
+    if (g && trimmed) await saveWeek();
+    render();
+  }
+
   async function moveGoal(id, targetDay){
     const g = state.week[state.activeTab].find(x => x.id === id);
     if (g) g.day = targetDay;
@@ -773,14 +807,18 @@
       const groups = groupByCategory(list);
       groups.forEach(group => {
         html += `<div class="category-group">
-          <div class="category-name">${escapeHtml(group.category)}</div>`;
+          <div class="category-name">${escapeHtml(group.category)}</div>
+          <div class="goal-list" data-category="${escapeHtml(group.category)}">`;
         group.goals.forEach(g => {
-          html += `<div class="goal-row">
-            <button class="goal-check ${g.done?'checked':''}" data-id="${g.id}" aria-label="${g.done?'Mark not done':'Mark done'}"></button>
-            <span class="goal-text ${g.done?'done':''}" data-id="${g.id}">${escapeHtml(g.text)}</span>
-            <button class="goal-move ${state.movingGoalId===g.id?'open':''}" data-id="${g.id}" aria-label="Move to another day">⇄</button>
-            <button class="goal-del" data-id="${g.id}" aria-label="Delete goal">✕</button>
-          </div>`;
+          html += `<div class="goal-item" data-id="${g.id}">
+            <div class="goal-row">
+              <button class="goal-check ${g.done?'checked':''}" data-id="${g.id}" aria-label="${g.done?'Mark not done':'Mark done'}"></button>
+              ${state.editingGoalId===g.id
+                ? `<input class="goal-edit-input" id="editInput" type="text" maxlength="140" value="${escapeHtml(g.text)}" data-id="${g.id}" />`
+                : `<span class="goal-text ${g.done?'done':''}" data-id="${g.id}" title="Click to edit">${escapeHtml(g.text)}</span>`}
+              <button class="goal-move ${state.movingGoalId===g.id?'open':''}" data-id="${g.id}" aria-label="Move to another day">⇄</button>
+              <button class="goal-del" data-id="${g.id}" aria-label="Delete goal">✕</button>
+            </div>`;
           if (state.movingGoalId === g.id){
             html += `<div class="move-row"><span class="move-label">Move to</span>`;
             DAYS[state.activeTab].forEach(d => {
@@ -788,8 +826,9 @@
             });
             html += `</div>`;
           }
+          html += `</div>`;
         });
-        html += `</div>`;
+        html += `</div></div>`;
       });
     }
 
@@ -804,6 +843,52 @@
     app.innerHTML = html;
     renderChips();
     attachHandlers();
+    initSortable();
+  }
+
+  let sortables = [];
+
+  // Rebuilds the tab's array from the DOM after a drag: the dragged goal takes
+  // the category of whatever list it landed in, and the visible day's goals are
+  // re-appended in their new on-screen order. Goals on other days are untouched.
+  async function applyDragOrder(){
+    const tab = state.activeTab;
+    const activeDay = state.selectedDay[tab];
+    const byId = new Map(state.week[tab].map(g => [g.id, g]));
+    const reordered = [];
+    document.querySelectorAll('.goal-list').forEach(listEl => {
+      const category = listEl.getAttribute('data-category');
+      listEl.querySelectorAll('.goal-item').forEach(item => {
+        const g = byId.get(item.getAttribute('data-id'));
+        if (g){ g.category = category; reordered.push(g); }
+      });
+    });
+    state.week[tab] = [...state.week[tab].filter(g => g.day !== activeDay), ...reordered];
+    await saveWeek();
+    render();
+  }
+
+  function initSortable(){
+    sortables.forEach(s => s.destroy());
+    sortables = [];
+    if (!window.Sortable) return; // CDN unavailable — app still works, just no dragging
+    document.querySelectorAll('.goal-list').forEach(el => {
+      sortables.push(new Sortable(el, {
+        group: 'goals',
+        draggable: '.goal-item',
+        animation: 150,
+        // Touch has no HTML5 drag-and-drop, so it uses the fallback regardless;
+        // forcing it on desktop too keeps the drag identical on both.
+        forceFallback: true,
+        fallbackTolerance: 4,
+        // Touch needs a long-press, otherwise a drag would hijack page scrolling.
+        delay: 200,
+        delayOnTouchOnly: true,
+        filter: '.goal-check, .goal-del, .goal-move, .move-row, .goal-edit-input',
+        preventOnFilter: false,
+        onEnd: applyDragOrder
+      }));
+    });
   }
 
   function renderChips(){
@@ -884,9 +969,28 @@
       el.addEventListener('click', () => moveGoal(el.getAttribute('data-id'), el.getAttribute('data-target')));
     });
 
-    document.querySelectorAll('.goal-check, .goal-text').forEach(el => {
+    document.querySelectorAll('.goal-check').forEach(el => {
       el.addEventListener('click', () => toggleGoal(el.getAttribute('data-id')));
     });
+    document.querySelectorAll('.goal-text').forEach(el => {
+      el.addEventListener('click', () => {
+        state.editingGoalId = el.getAttribute('data-id');
+        render();
+        const inp = document.getElementById('editInput');
+        if (inp){ inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+      });
+    });
+
+    const editInput = document.getElementById('editInput');
+    if (editInput){
+      let settled = false;
+      const commit = () => { if (!settled){ settled = true; saveGoalText(editInput.getAttribute('data-id'), editInput.value); } };
+      editInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') commit();
+        if (e.key === 'Escape'){ settled = true; state.editingGoalId = null; render(); }
+      });
+      editInput.addEventListener('blur', commit);
+    }
     document.querySelectorAll('.goal-del').forEach(el => {
       el.addEventListener('click', () => deleteGoal(el.getAttribute('data-id')));
     });

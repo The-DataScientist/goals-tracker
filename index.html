@@ -1111,8 +1111,9 @@
         <span class="weekly-title">This week goals</span>
         ${weekly.length ? `<span class="weekly-count ${wkDone===weekly.length?'all-done':''}">${wkDone}/${weekly.length} done</span>` : ''}
       </div>`;
+    html += `<div class="wk-list">`;
     weekly.forEach(g => {
-      html += `<div class="goal-row weekly-row">
+      html += `<div class="goal-row weekly-row wk-item" data-wid="${g.id}">
         <button class="goal-check wk-check ${g.done?'checked':''}" data-wid="${g.id}" aria-label="${g.done?'Mark not done':'Mark done'}"></button>
         ${state.editingWeeklyId===g.id
           ? `<input class="goal-edit-input" id="weeklyEditInput" type="text" maxlength="140" value="${escapeHtml(g.text)}" data-wid="${g.id}" />`
@@ -1120,6 +1121,7 @@
         <button class="goal-del wk-del" data-wid="${g.id}" aria-label="Delete weekly goal">✕</button>
       </div>`;
     });
+    html += `</div>`;
     html += `<input class="weekly-add" id="weeklyInput" type="text" maxlength="140" placeholder="Add a goal for the whole week" />
     </section>`;
 
@@ -1248,6 +1250,26 @@
         onEnd: applyDragOrder
       }));
     });
+
+    const wkList = document.querySelector('.wk-list');
+    if (wkList && state.week.weekly.length > 1){
+      sortables.push(new Sortable(wkList, {
+        draggable: '.wk-item',
+        animation: 150,
+        forceFallback: true,
+        fallbackTolerance: 4,
+        delay: 200,
+        delayOnTouchOnly: true,
+        filter: '.wk-check, .wk-del, .goal-edit-input',
+        preventOnFilter: false,
+        onEnd: async () => {
+          const byId = new Map(state.week.weekly.map(g => [g.id, g]));
+          state.week.weekly = [...wkList.querySelectorAll('.wk-item')].map(el => byId.get(el.getAttribute('data-wid'))).filter(Boolean);
+          await saveWeek();
+          render();
+        }
+      }));
+    }
   }
 
   function renderChips(){

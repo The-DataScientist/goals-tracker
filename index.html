@@ -105,6 +105,51 @@
   .weekly-count.all-done{ color: var(--done); font-weight: 600; }
   .weekly-row:last-of-type{ border-bottom: none; }
   .layout{ max-width: 480px; margin: 0 auto; }
+  .ov-item{ border-bottom: 1px solid var(--line); }
+  .ov-item:last-child{ border-bottom: none; }
+  .ov-item .goal-row{ border-bottom: none; padding-bottom: 2px; }
+  .ov-note-wrap{ padding: 0 24px 10px 28px; }
+  .ov-note{
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--ink-soft);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+  }
+  .ov-note.done{ opacity: .7; }
+  .ov-note-add{
+    background:none;
+    border:none;
+    padding: 0;
+    font-family: 'Libre Franklin', sans-serif;
+    font-size: 12px;
+    color: var(--ink-soft);
+    cursor: pointer;
+    opacity: .75;
+  }
+  .ov-note-add:hover{ opacity: 1; color: var(--ink); }
+  .ov-note-input{
+    width: 100%;
+    font-family: 'Libre Franklin', sans-serif;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--ink);
+    background: none;
+    border: none;
+    border-bottom: 1.5px solid var(--ink-soft);
+    padding: 0 0 2px;
+    resize: none;
+    overflow: hidden;
+    display: block;
+  }
+  .ov-note-input:focus{ outline: none; border-bottom-color: var(--ink); }
+  .ov-list .sortable-chosen{ background: var(--bg); border-radius: 6px; }
+  @media (min-width: 768px){
+    .ov-note-wrap{ padding-left: 32px; }
+    .ov-note, .ov-note-input{ font-size: 13.5px; }
+  }
   .overall{
     border: 1px solid var(--line);
     border-radius: 10px;
@@ -531,7 +576,7 @@
       column-gap: 32px;
     }
     .app{ grid-column: 2; }
-    .overall{ grid-column: 3; max-width: 460px; }
+    .overall{ grid-column: 3; max-width: 360px; }
   }
 </style>
 </head>
@@ -659,6 +704,7 @@
     editingWeeklyId: null,
     overall: [],
     editingOverallId: null,
+    editingNoteId: null,
     addingCategory: false,
     ready: false
   };
@@ -764,6 +810,19 @@
     renderOverall();
   }
 
+  let overallSortable = null;
+
+  async function saveOverallNote(id, text){
+    const g = state.overall.find(x => x.id === id);
+    const trimmed = text.trim();
+    state.editingNoteId = null;
+    if (g && trimmed !== (g.note || '')){
+      if (trimmed) g.note = trimmed; else delete g.note;
+      await saveOverall();
+    }
+    renderOverall();
+  }
+
   async function deleteOverall(id){
     state.overall = state.overall.filter(x => x.id !== id);
     await saveOverall();
@@ -777,18 +836,77 @@
         <span class="weekly-title">Overall goals</span>
         ${list.length ? `<span class="weekly-count ${oDone===list.length?'all-done':''}">${oDone}/${list.length} done</span>` : ''}
       </div>`;
+    html += `<div class="ov-list">`;
     list.forEach(g => {
-      html += `<div class="goal-row weekly-row">
-        <button class="goal-check ov-check ${g.done?'checked':''}" data-oid="${g.id}" aria-label="${g.done?'Mark not done':'Mark done'}"></button>
-        ${state.editingOverallId===g.id
-          ? `<input class="goal-edit-input" id="overallEditInput" type="text" maxlength="140" value="${escapeHtml(g.text)}" data-oid="${g.id}" />`
-          : `<span class="goal-text ov-text ${g.done?'done':''}" data-oid="${g.id}" title="Click to edit">${escapeHtml(g.text)}</span>`}
-        <button class="goal-del ov-del" data-oid="${g.id}" aria-label="Delete overall goal">✕</button>
+      let note;
+      if (state.editingNoteId === g.id){
+        note = `<textarea class="ov-note-input" id="overallNoteInput" rows="1" maxlength="600" data-oid="${g.id}" placeholder="What does this goal mean, why it matters…">${escapeHtml(g.note || '')}</textarea>`;
+      } else if (g.note){
+        note = `<p class="ov-note ${g.done?'done':''}" data-oid="${g.id}" title="Click to edit">${escapeHtml(g.note)}</p>`;
+      } else {
+        note = `<button class="ov-note-add" data-oid="${g.id}">+ Add details</button>`;
+      }
+      html += `<div class="ov-item" data-oid="${g.id}">
+        <div class="goal-row">
+          <button class="goal-check ov-check ${g.done?'checked':''}" data-oid="${g.id}" aria-label="${g.done?'Mark not done':'Mark done'}"></button>
+          ${state.editingOverallId===g.id
+            ? `<input class="goal-edit-input" id="overallEditInput" type="text" maxlength="140" value="${escapeHtml(g.text)}" data-oid="${g.id}" />`
+            : `<span class="goal-text ov-text ${g.done?'done':''}" data-oid="${g.id}" title="Click to edit">${escapeHtml(g.text)}</span>`}
+          <button class="goal-del ov-del" data-oid="${g.id}" aria-label="Delete overall goal">✕</button>
+        </div>
+        <div class="ov-note-wrap">${note}</div>
       </div>`;
     });
+    html += `</div>`;
     html += `<input class="weekly-add" id="overallInput" type="text" maxlength="140" placeholder="Add a long-term goal" />`;
+    if (overallSortable){ overallSortable.destroy(); overallSortable = null; }
     overallEl.innerHTML = html;
     overallEl.hidden = false;
+
+    const listEl = overallEl.querySelector('.ov-list');
+    if (window.Sortable && list.length > 1){
+      overallSortable = new Sortable(listEl, {
+        draggable: '.ov-item',
+        animation: 150,
+        forceFallback: true,
+        fallbackTolerance: 4,
+        delay: 200,
+        delayOnTouchOnly: true,
+        filter: '.ov-check, .ov-del, .goal-edit-input, .ov-note-input, .ov-note-add',
+        preventOnFilter: false,
+        onEnd: async () => {
+          const byId = new Map(state.overall.map(g => [g.id, g]));
+          state.overall = [...listEl.querySelectorAll('.ov-item')].map(el => byId.get(el.getAttribute('data-oid'))).filter(Boolean);
+          await saveOverall();
+          renderOverall();
+        }
+      });
+    }
+
+    const openNote = (id) => {
+      state.editingNoteId = id;
+      renderOverall();
+      const ta = document.getElementById('overallNoteInput');
+      if (ta){ ta.style.height = ta.scrollHeight + 'px'; ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+    };
+    overallEl.querySelectorAll('.ov-note-add, .ov-note').forEach(el => {
+      el.addEventListener('click', () => openNote(el.getAttribute('data-oid')));
+    });
+    const noteInput = document.getElementById('overallNoteInput');
+    if (noteInput){
+      let settled = false;
+      const commit = () => { if (!settled){ settled = true; saveOverallNote(noteInput.getAttribute('data-oid'), noteInput.value); } };
+      noteInput.addEventListener('input', () => {
+        noteInput.style.height = 'auto';
+        noteInput.style.height = noteInput.scrollHeight + 'px';
+      });
+      noteInput.addEventListener('keydown', (e) => {
+        // Enter saves like every other field here; Shift+Enter starts a new line.
+        if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); commit(); }
+        if (e.key === 'Escape'){ settled = true; state.editingNoteId = null; renderOverall(); }
+      });
+      noteInput.addEventListener('blur', commit);
+    }
 
     overallEl.querySelectorAll('.ov-check').forEach(el => {
       el.addEventListener('click', () => toggleOverall(el.getAttribute('data-oid')));

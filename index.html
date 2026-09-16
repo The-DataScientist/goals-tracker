@@ -836,17 +836,6 @@
       <div class="week-label">${fmtWeekLabel(state.monday)}</div>
       <button class="nav-btn" id="nextWeek" aria-label="Next week">›</button>
     </div>`;
-    html += `<div class="tabs">
-      <button class="tab ${isWeekday?'active':''}" data-tab="weekday">
-        <span class="t-name">Weekday</span>
-        <span class="t-count">${wdDone}/${wdTotal} done</span>
-      </button>
-      <button class="tab ${!isWeekday?'active':''}" data-tab="weekend">
-        <span class="t-name">Weekend</span>
-        <span class="t-count">${weDone}/${weTotal} done</span>
-      </button>
-    </div>`;
-
     const weekly = state.week.weekly;
     const wkDone = weekly.filter(g => g.done).length;
     html += `<section class="weekly">
@@ -865,6 +854,17 @@
     });
     html += `<input class="weekly-add" id="weeklyInput" type="text" maxlength="140" placeholder="Add a goal for the whole week" />
     </section>`;
+
+    html += `<div class="tabs">
+      <button class="tab ${isWeekday?'active':''}" data-tab="weekday">
+        <span class="t-name">Weekday</span>
+        <span class="t-count">${wdDone}/${wdTotal} done</span>
+      </button>
+      <button class="tab ${!isWeekday?'active':''}" data-tab="weekend">
+        <span class="t-name">Weekend</span>
+        <span class="t-count">${weDone}/${weTotal} done</span>
+      </button>
+    </div>`;
 
     html += `<div class="day-row">`;
     DAYS[state.activeTab].forEach(day => {

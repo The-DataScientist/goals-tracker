@@ -104,6 +104,13 @@
   .weekly-count{ font-size: 12px; color: var(--ink-soft); }
   .weekly-count.all-done{ color: var(--done); font-weight: 600; }
   .weekly-row:last-of-type{ border-bottom: none; }
+  .layout{ max-width: 480px; margin: 0 auto; }
+  .overall{
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 14px 4px;
+    margin: 16px 18px 0;
+  }
   .weekly-add{
     width:100%;
     font-family: 'Libre Franklin', sans-serif;
@@ -443,16 +450,24 @@
       min-height: 100vh;
       padding: 40px 20px;
     }
-    .app{
+    .layout{
       width: 100%;
       max-width: 620px;
       margin: auto;
+      display:flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .app, .overall{
+      width: 100%;
+      max-width: none;
+      margin: 0;
       background: var(--surface);
       border: 1px solid var(--line);
-      border-radius: 16px;
-      padding: 36px 40px 40px;
       box-shadow: 0 1px 3px rgba(35,36,31,.05), 0 12px 32px rgba(35,36,31,.07);
     }
+    .app{ border-radius: 16px; padding: 36px 40px 40px; }
+    .overall{ border-radius: 14px; padding: 20px 24px 8px; }
     .nav-btn{ font-size: 22px; }
     .week-label{ font-size: 34px; }
     .header{ margin-bottom: 26px; }
@@ -489,11 +504,43 @@
     .signin-title{ font-size: 34px; }
     .signin-sub{ font-size: 15px; }
   }
+
+  /* Room beside the card: overall goals go in a right-hand column and stay
+     pinned while the week scrolls. */
+  @media (min-width: 980px){
+    .layout{
+      max-width: none;
+      display:grid;
+      grid-template-columns: minmax(0, 620px) 280px;
+      justify-content: center;
+      column-gap: 24px;
+      align-items: start;
+    }
+    .app{ grid-column: 1; grid-row: 1; }
+    .overall{
+      grid-column: 2;
+      grid-row: 1;
+      position: sticky;
+      top: 40px;
+    }
+  }
+  /* Wide enough to keep the card itself centered with the column beside it. */
+  @media (min-width: 1300px){
+    .layout{
+      grid-template-columns: 1fr minmax(0, 620px) 1fr;
+      column-gap: 32px;
+    }
+    .app{ grid-column: 2; }
+    .overall{ grid-column: 3; max-width: 320px; }
+  }
 </style>
 </head>
 <body>
-<div class="app" id="app">
-  <div class="loading" id="loading">Loading your week…</div>
+<div class="layout">
+  <aside class="overall" id="overall" hidden></aside>
+  <div class="app" id="app">
+    <div class="loading" id="loading">Loading your week…</div>
+  </div>
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
@@ -610,6 +657,8 @@
     movingGoalId: null,
     editingGoalId: null,
     editingWeeklyId: null,
+    overall: [],
+    editingOverallId: null,
     addingCategory: false,
     ready: false
   };
@@ -619,6 +668,7 @@
   state.selectedDay.weekend = defaultDay(state.today, 'weekend');
 
   const app = document.getElementById('app');
+  const overallEl = document.getElementById('overall');
 
   async function weekKey(monday){ return 'goals-week:' + isoDate(monday); }
 
@@ -673,13 +723,113 @@
     }catch(e){ console.error('Storage error saving categories', e); }
   }
 
+  async function loadOverall(){
+    try{
+      const res = await window.storage.get('goals-overall', false);
+      if (res && res.value){
+        const arr = JSON.parse(res.value);
+        if (Array.isArray(arr)) return arr;
+      }
+    }catch(e){ /* none yet */ }
+    return [];
+  }
+
+  async function saveOverall(){
+    try{
+      await window.storage.set('goals-overall', JSON.stringify(state.overall), false);
+    }catch(e){ console.error('Storage error saving overall goals', e); }
+  }
+
+  async function addOverall(text){
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    state.overall.push({ id: uid(), text: trimmed, done: false });
+    await saveOverall();
+    renderOverall();
+    const inp = document.getElementById('overallInput');
+    if (inp) inp.focus();
+  }
+
+  async function toggleOverall(id){
+    const g = state.overall.find(x => x.id === id);
+    if (g){ g.done = !g.done; await saveOverall(); renderOverall(); }
+  }
+
+  async function saveOverallText(id, text){
+    const trimmed = text.trim();
+    const g = state.overall.find(x => x.id === id);
+    if (g && trimmed) g.text = trimmed;
+    state.editingOverallId = null;
+    if (g && trimmed) await saveOverall();
+    renderOverall();
+  }
+
+  async function deleteOverall(id){
+    state.overall = state.overall.filter(x => x.id !== id);
+    await saveOverall();
+    renderOverall();
+  }
+
+  function renderOverall(){
+    const list = state.overall;
+    const oDone = list.filter(g => g.done).length;
+    let html = `<div class="weekly-head">
+        <span class="weekly-title">Overall goals</span>
+        ${list.length ? `<span class="weekly-count ${oDone===list.length?'all-done':''}">${oDone}/${list.length} done</span>` : ''}
+      </div>`;
+    list.forEach(g => {
+      html += `<div class="goal-row weekly-row">
+        <button class="goal-check ov-check ${g.done?'checked':''}" data-oid="${g.id}" aria-label="${g.done?'Mark not done':'Mark done'}"></button>
+        ${state.editingOverallId===g.id
+          ? `<input class="goal-edit-input" id="overallEditInput" type="text" maxlength="140" value="${escapeHtml(g.text)}" data-oid="${g.id}" />`
+          : `<span class="goal-text ov-text ${g.done?'done':''}" data-oid="${g.id}" title="Click to edit">${escapeHtml(g.text)}</span>`}
+        <button class="goal-del ov-del" data-oid="${g.id}" aria-label="Delete overall goal">✕</button>
+      </div>`;
+    });
+    html += `<input class="weekly-add" id="overallInput" type="text" maxlength="140" placeholder="Add a long-term goal" />`;
+    overallEl.innerHTML = html;
+    overallEl.hidden = false;
+
+    overallEl.querySelectorAll('.ov-check').forEach(el => {
+      el.addEventListener('click', () => toggleOverall(el.getAttribute('data-oid')));
+    });
+    overallEl.querySelectorAll('.ov-del').forEach(el => {
+      el.addEventListener('click', () => deleteOverall(el.getAttribute('data-oid')));
+    });
+    overallEl.querySelectorAll('.ov-text').forEach(el => {
+      el.addEventListener('click', () => {
+        state.editingOverallId = el.getAttribute('data-oid');
+        renderOverall();
+        const inp = document.getElementById('overallEditInput');
+        if (inp){ inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+      });
+    });
+    const edit = document.getElementById('overallEditInput');
+    if (edit){
+      let settled = false;
+      const commit = () => { if (!settled){ settled = true; saveOverallText(edit.getAttribute('data-oid'), edit.value); } };
+      edit.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') commit();
+        if (e.key === 'Escape'){ settled = true; state.editingOverallId = null; renderOverall(); }
+      });
+      edit.addEventListener('blur', commit);
+    }
+    const input = document.getElementById('overallInput');
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') addOverall(input.value);
+    });
+  }
+
   async function init(){
-    const [week, categories] = await Promise.all([
+    const [week, categories, overall] = await Promise.all([
       loadWeek(state.monday),
-      loadCategories()
+      loadCategories(),
+      loadOverall()
     ]);
     state.week = week;
     state.categories = categories;
+    state.overall = overall;
+    renderOverall();
     state.selectedCategory = categories[0];
 
     const prevMonday = new Date(state.monday); prevMonday.setDate(prevMonday.getDate()-7);
@@ -840,7 +990,7 @@
     const wkDone = weekly.filter(g => g.done).length;
     html += `<section class="weekly">
       <div class="weekly-head">
-        <span class="weekly-title">This week</span>
+        <span class="weekly-title">This week goals</span>
         ${weekly.length ? `<span class="weekly-count ${wkDone===weekly.length?'all-done':''}">${wkDone}/${weekly.length} done</span>` : ''}
       </div>`;
     weekly.forEach(g => {
@@ -1133,6 +1283,8 @@
   }
 
   function showSignIn(){
+    overallEl.hidden = true;
+    overallEl.innerHTML = '';
     app.innerHTML = `<div class="signin">
       <div class="signin-title">Goals Tracker</div>
       <div class="signin-sub">Sign in to save your goals and sync them across devices.</div>

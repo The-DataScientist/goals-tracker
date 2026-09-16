@@ -88,6 +88,34 @@
   .tab[data-tab="weekend"].active{ border-color: var(--weekend); }
   .tab:focus-visible{ outline: 2px solid var(--ink); outline-offset: -2px; }
 
+  .weekly{
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 14px 4px;
+    margin-bottom: 18px;
+  }
+  .weekly-head{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    margin-bottom: 2px;
+  }
+  .weekly-title{ font-size: 13px; font-weight: 600; color: var(--ink); }
+  .weekly-count{ font-size: 12px; color: var(--ink-soft); }
+  .weekly-count.all-done{ color: var(--done); font-weight: 600; }
+  .weekly-row:last-of-type{ border-bottom: none; }
+  .weekly-add{
+    width:100%;
+    font-family: 'Libre Franklin', sans-serif;
+    font-size: 14px;
+    padding: 10px 0;
+    border:none;
+    background:none;
+    color: var(--ink);
+  }
+  .weekly-add:focus{ outline:none; }
+  .weekly-add::placeholder{ color: var(--ink-soft); }
+
   .day-row{
     display:flex;
     gap: 6px;
@@ -432,6 +460,10 @@
     .tab{ padding: 12px 4px 14px; }
     .tab .t-name{ font-size: 17px; }
     .tab .t-count{ font-size: 13px; }
+    .weekly{ padding: 14px 18px 4px; margin-bottom: 22px; }
+    .weekly-title{ font-size: 14px; }
+    .weekly-count{ font-size: 13px; }
+    .weekly-add{ font-size: 15px; }
     .day-row{ gap: 8px; margin-bottom: 22px; }
     .day-btn{ padding: 9px 4px; border-radius: 10px; }
     .day-btn .d-name{ font-size: 13.5px; }
@@ -577,6 +609,7 @@
     selectedDay: { weekday: null, weekend: null },
     movingGoalId: null,
     editingGoalId: null,
+    editingWeeklyId: null,
     addingCategory: false,
     ready: false
   };
@@ -605,11 +638,16 @@
         return {
           weekday: withDays(parsed.weekday, 'weekday'),
           weekend: withDays(parsed.weekend, 'weekend'),
+          weekly: parsed.weekly || [],
           copyDismissed: !!parsed.copyDismissed
         };
       }
     }catch(e){ /* no data for this week yet */ }
-    return { weekday: [], weekend: [], copyDismissed: false };
+    return { weekday: [], weekend: [], weekly: [], copyDismissed: false };
+  }
+
+  function isEmptyWeek(w){
+    return w.weekday.length === 0 && w.weekend.length === 0 && w.weekly.length === 0;
   }
 
   async function saveWeek(){
@@ -645,9 +683,9 @@
     state.selectedCategory = categories[0];
 
     const prevMonday = new Date(state.monday); prevMonday.setDate(prevMonday.getDate()-7);
-    if (week.weekday.length === 0 && week.weekend.length === 0 && !week.copyDismissed){
+    if (isEmptyWeek(week) && !week.copyDismissed){
       state.prevWeek = await loadWeek(prevMonday);
-      if (state.prevWeek.weekday.length === 0 && state.prevWeek.weekend.length === 0) state.prevWeek = null;
+      if (isEmptyWeek(state.prevWeek)) state.prevWeek = null;
     }
 
     state.ready = true;
@@ -659,10 +697,10 @@
     state.monday.setDate(state.monday.getDate() + offsetDays);
     state.week = await loadWeek(state.monday);
     state.prevWeek = null;
-    if (state.week.weekday.length === 0 && state.week.weekend.length === 0 && !state.week.copyDismissed){
+    if (isEmptyWeek(state.week) && !state.week.copyDismissed){
       const prevMonday = new Date(state.monday); prevMonday.setDate(prevMonday.getDate()-7);
       const pw = await loadWeek(prevMonday);
-      if (pw.weekday.length > 0 || pw.weekend.length > 0) state.prevWeek = pw;
+      if (!isEmptyWeek(pw)) state.prevWeek = pw;
     }
     render();
   }
@@ -679,9 +717,40 @@
     state.week = {
       weekday: state.prevWeek.weekday.map(g => ({ ...g, id: uid(), done: false })),
       weekend: state.prevWeek.weekend.map(g => ({ ...g, id: uid(), done: false })),
+      weekly: state.prevWeek.weekly.map(g => ({ ...g, id: uid(), done: false })),
       copyDismissed: true
     };
     state.prevWeek = null;
+    await saveWeek();
+    render();
+  }
+
+  async function addWeekly(text){
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    state.week.weekly.push({ id: uid(), text: trimmed, done: false });
+    await saveWeek();
+    render();
+    const inp = document.getElementById('weeklyInput');
+    if (inp) inp.focus();
+  }
+
+  async function toggleWeekly(id){
+    const g = state.week.weekly.find(x => x.id === id);
+    if (g){ g.done = !g.done; await saveWeek(); render(); }
+  }
+
+  async function saveWeeklyText(id, text){
+    const trimmed = text.trim();
+    const g = state.week.weekly.find(x => x.id === id);
+    if (g && trimmed) g.text = trimmed;
+    state.editingWeeklyId = null;
+    if (g && trimmed) await saveWeek();
+    render();
+  }
+
+  async function deleteWeekly(id){
+    state.week.weekly = state.week.weekly.filter(x => x.id !== id);
     await saveWeek();
     render();
   }
@@ -777,6 +846,25 @@
         <span class="t-count">${weDone}/${weTotal} done</span>
       </button>
     </div>`;
+
+    const weekly = state.week.weekly;
+    const wkDone = weekly.filter(g => g.done).length;
+    html += `<section class="weekly">
+      <div class="weekly-head">
+        <span class="weekly-title">This week</span>
+        ${weekly.length ? `<span class="weekly-count ${wkDone===weekly.length?'all-done':''}">${wkDone}/${weekly.length} done</span>` : ''}
+      </div>`;
+    weekly.forEach(g => {
+      html += `<div class="goal-row weekly-row">
+        <button class="goal-check wk-check ${g.done?'checked':''}" data-wid="${g.id}" aria-label="${g.done?'Mark not done':'Mark done'}"></button>
+        ${state.editingWeeklyId===g.id
+          ? `<input class="goal-edit-input" id="weeklyEditInput" type="text" maxlength="140" value="${escapeHtml(g.text)}" data-wid="${g.id}" />`
+          : `<span class="goal-text wk-text ${g.done?'done':''}" data-wid="${g.id}" title="Click to edit">${escapeHtml(g.text)}</span>`}
+        <button class="goal-del wk-del" data-wid="${g.id}" aria-label="Delete weekly goal">✕</button>
+      </div>`;
+    });
+    html += `<input class="weekly-add" id="weeklyInput" type="text" maxlength="140" placeholder="Add a goal for the whole week" />
+    </section>`;
 
     html += `<div class="day-row">`;
     DAYS[state.activeTab].forEach(day => {
@@ -972,10 +1060,10 @@
       el.addEventListener('click', () => moveGoal(el.getAttribute('data-id'), el.getAttribute('data-target')));
     });
 
-    document.querySelectorAll('.goal-check').forEach(el => {
+    document.querySelectorAll('.goal-list .goal-check').forEach(el => {
       el.addEventListener('click', () => toggleGoal(el.getAttribute('data-id')));
     });
-    document.querySelectorAll('.goal-text').forEach(el => {
+    document.querySelectorAll('.goal-list .goal-text').forEach(el => {
       el.addEventListener('click', () => {
         state.editingGoalId = el.getAttribute('data-id');
         render();
@@ -994,8 +1082,37 @@
       });
       editInput.addEventListener('blur', commit);
     }
-    document.querySelectorAll('.goal-del').forEach(el => {
+    document.querySelectorAll('.goal-list .goal-del').forEach(el => {
       el.addEventListener('click', () => deleteGoal(el.getAttribute('data-id')));
+    });
+
+    document.querySelectorAll('.wk-check').forEach(el => {
+      el.addEventListener('click', () => toggleWeekly(el.getAttribute('data-wid')));
+    });
+    document.querySelectorAll('.wk-del').forEach(el => {
+      el.addEventListener('click', () => deleteWeekly(el.getAttribute('data-wid')));
+    });
+    document.querySelectorAll('.wk-text').forEach(el => {
+      el.addEventListener('click', () => {
+        state.editingWeeklyId = el.getAttribute('data-wid');
+        render();
+        const inp = document.getElementById('weeklyEditInput');
+        if (inp){ inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+      });
+    });
+    const weeklyEdit = document.getElementById('weeklyEditInput');
+    if (weeklyEdit){
+      let settled = false;
+      const commit = () => { if (!settled){ settled = true; saveWeeklyText(weeklyEdit.getAttribute('data-wid'), weeklyEdit.value); } };
+      weeklyEdit.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') commit();
+        if (e.key === 'Escape'){ settled = true; state.editingWeeklyId = null; render(); }
+      });
+      weeklyEdit.addEventListener('blur', commit);
+    }
+    const weeklyInput = document.getElementById('weeklyInput');
+    weeklyInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') addWeekly(weeklyInput.value);
     });
 
     const input = document.getElementById('goalInput');

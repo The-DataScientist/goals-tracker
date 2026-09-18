@@ -735,6 +735,7 @@
     editingOverallId: null,
     editingNoteId: null,
     routines: [],
+    dayOrder: {},
     weeklyCategory: null,
     overallCategory: null,
     addingCategory: false,
@@ -1024,13 +1025,15 @@
   }
 
   async function init(){
-    const [week, categories, overall, routines] = await Promise.all([
+    const [week, categories, overall, routines, dayOrder] = await Promise.all([
       loadWeek(state.monday),
       loadCategories(),
       loadOverall(),
-      loadRoutines()
+      loadRoutines(),
+      loadDayOrder()
     ]);
     state.routines = routines;
+    state.dayOrder = dayOrder;
     state.week = week;
     state.categories = categories;
     state.overall = overall;
@@ -1142,14 +1145,33 @@
     }catch(e){ console.error('Storage error saving repeating goals', e); }
   }
 
+  async function loadDayOrder(){
+    try{
+      const res = await window.storage.get('goals-dayorder', false);
+      if (res && res.value){
+        const obj = JSON.parse(res.value);
+        if (obj && typeof obj === 'object') return obj;
+      }
+    }catch(e){ /* none yet */ }
+    return {};
+  }
+
+  async function saveDayOrder(){
+    try{
+      await window.storage.set('goals-dayorder', JSON.stringify(state.dayOrder), false);
+    }catch(e){ console.error('Storage error saving day order', e); }
+  }
+
   function routineKey(rid, day){ return rid + '|' + day; }
   function isRoutineId(id){ return id.startsWith('r:'); }
   function routineById(id){ return state.routines.find(r => 'r:' + r.id === id); }
 
   // A day's goals: repeating goals scheduled on it (from the week each was
-  // created onward, so older weeks don't suddenly show them unticked) followed
-  // by that day's one-off goals. Repeating goals keep their ticks per week in
-  // week.routineDone.
+  // created onward, so older weeks don't suddenly show them unticked) plus that
+  // day's one-off goals. Repeating goals keep their ticks per week in
+  // week.routineDone. The order is the last one dragged for that day of the
+  // week (dayOrder, keyed by day name so repeating goals keep their spot week
+  // to week); anything not in it yet keeps its default place after those.
   function goalsFor(tab, day){
     const wk = isoDate(state.monday);
     const doneSet = new Set(state.week.routineDone || []);
@@ -1157,7 +1179,14 @@
       .filter(r => r.days.includes(day) && r.since <= wk)
       .map(r => ({ id: 'r:' + r.id, text: r.text, category: r.category, day,
                    done: doneSet.has(routineKey(r.id, day)), routine: true, days: r.days }));
-    return [...repeating, ...state.week[tab].filter(g => g.day === day)];
+    const all = [...repeating, ...state.week[tab].filter(g => g.day === day)];
+    const order = state.dayOrder[day];
+    if (!order) return all;
+    const pos = new Map(order.map((id, i) => [id, i]));
+    return all
+      .map((g, i) => ({ g, key: pos.has(g.id) ? pos.get(g.id) : order.length + i }))
+      .sort((a, b) => a.key - b.key)
+      .map(x => x.g);
   }
 
   async function toggleGoal(id){
@@ -1427,23 +1456,34 @@
 
   let sortables = [];
 
-  // Rebuilds the tab's array from the DOM after a drag: the dragged goal takes
-  // the category of whatever list it landed in, and the visible day's goals are
-  // re-appended in their new on-screen order. Goals on other days are untouched.
+  // Reads the day back from the DOM after a drag. The dragged goal takes the
+  // category of the list it landed in (for a repeating goal, on every day),
+  // one-off goals are re-appended in their new order, and the full on-screen
+  // order, repeating goals included, is remembered for that day of the week.
   async function applyDragOrder(){
     const tab = state.activeTab;
     const activeDay = state.selectedDay[tab];
     const byId = new Map(state.week[tab].map(g => [g.id, g]));
     const reordered = [];
+    const ids = [];
+    let routinesChanged = false;
     document.querySelectorAll('.goal-list').forEach(listEl => {
       const category = listEl.getAttribute('data-category');
       listEl.querySelectorAll('.goal-item').forEach(item => {
-        const g = byId.get(item.getAttribute('data-id'));
+        const id = item.getAttribute('data-id');
+        ids.push(id);
+        if (isRoutineId(id)){
+          const r = routineById(id);
+          if (r && r.category !== category){ r.category = category; routinesChanged = true; }
+          return;
+        }
+        const g = byId.get(id);
         if (g){ g.category = category; reordered.push(g); }
       });
     });
     state.week[tab] = [...state.week[tab].filter(g => g.day !== activeDay), ...reordered];
-    await saveWeek();
+    state.dayOrder[activeDay] = ids;
+    await Promise.all([saveWeek(), saveDayOrder(), routinesChanged ? saveRoutines() : null]);
     render();
   }
 
@@ -1463,9 +1503,7 @@
         // Touch needs a long-press, otherwise a drag would hijack page scrolling.
         delay: 200,
         delayOnTouchOnly: true,
-        // Repeating goals are rebuilt from their schedule on every render, so
-        // they can't be dragged into a day's order.
-        filter: '.goal-check, .goal-del, .goal-move, .move-row, .goal-edit-input, .routine-item',
+        filter: '.goal-check, .goal-del, .goal-move, .move-row, .goal-edit-input',
         preventOnFilter: false,
         onEnd: applyDragOrder
       }));

@@ -105,6 +105,28 @@
   .weekly-count.all-done{ color: var(--done); font-weight: 600; }
   .weekly-row:last-of-type{ border-bottom: none; }
   .layout{ max-width: 480px; margin: 0 auto; }
+  .sub-group{ margin-top: 10px; }
+  .sub-group .category-name{ margin-bottom: 0; }
+  .mini-chips{
+    display: none;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 0 0 12px;
+  }
+  .mini-add:focus-within .mini-chips,
+  .mini-add.has-text .mini-chips{ display: flex; }
+  .mini-chip{
+    border: 1px solid var(--line);
+    background: none;
+    border-radius: 14px;
+    padding: 4px 11px;
+    font-family: 'Libre Franklin', sans-serif;
+    font-size: 12px;
+    color: var(--ink-soft);
+    cursor: pointer;
+  }
+  .mini-chip:hover{ border-color: var(--ink-soft); color: var(--ink); }
+  .mini-chip.selected{ border-color: var(--ink); color: var(--ink); font-weight: 600; }
   .ov-item{ border-bottom: 1px solid var(--line); }
   .ov-item:last-child{ border-bottom: none; }
   .ov-item .goal-row{ border-bottom: none; padding-bottom: 2px; }
@@ -705,6 +727,8 @@
     overall: [],
     editingOverallId: null,
     editingNoteId: null,
+    weeklyCategory: null,
+    overallCategory: null,
     addingCategory: false,
     ready: false
   };
@@ -789,7 +813,7 @@
   async function addOverall(text){
     const trimmed = text.trim();
     if (!trimmed) return;
-    state.overall.push({ id: uid(), text: trimmed, done: false });
+    state.overall.push({ id: uid(), text: trimmed, done: false, category: pickCategory(state.overallCategory) });
     await saveOverall();
     renderOverall();
     const inp = document.getElementById('overallInput');
@@ -810,7 +834,41 @@
     renderOverall();
   }
 
-  let overallSortable = null;
+  let overallSortables = [];
+
+  function pickCategory(current){
+    return state.categories.includes(current) ? current : state.categories[0];
+  }
+
+  // Goals saved before these lists had categories get the first one, so they
+  // still land in a group; the change is persisted with the list's next save.
+  function fillCategories(list){
+    list.forEach(g => { if (!g.category) g.category = state.categories[0]; });
+  }
+
+  function miniAddHtml(inputId, placeholder, selected){
+    return `<div class="mini-add">
+      <input class="weekly-add" id="${inputId}" type="text" maxlength="140" placeholder="${placeholder}" />
+      <div class="mini-chips">${state.categories.map(c =>
+        `<button type="button" class="mini-chip ${c===selected?'selected':''}" data-cat="${escapeHtml(c)}">${escapeHtml(c)}</button>`
+      ).join('')}</div>
+    </div>`;
+  }
+
+  function wireMiniAdd(input, onPick){
+    const wrap = input.closest('.mini-add');
+    input.addEventListener('input', () => wrap.classList.toggle('has-text', !!input.value));
+    wrap.querySelectorAll('.mini-chip').forEach(btn => {
+      // The chips only show while the field has focus; keep it there so they
+      // don't disappear between mousedown and click.
+      btn.addEventListener('mousedown', e => e.preventDefault());
+      btn.addEventListener('click', () => {
+        onPick(btn.getAttribute('data-cat'));
+        wrap.querySelectorAll('.mini-chip').forEach(b => b.classList.toggle('selected', b === btn));
+        input.focus();
+      });
+    });
+  }
 
   async function saveOverallNote(id, text){
     const g = state.overall.find(x => x.id === id);
@@ -831,13 +889,17 @@
 
   function renderOverall(){
     const list = state.overall;
+    fillCategories(list);
     const oDone = list.filter(g => g.done).length;
     let html = `<div class="weekly-head">
         <span class="weekly-title">Overall goals</span>
         ${list.length ? `<span class="weekly-count ${oDone===list.length?'all-done':''}">${oDone}/${list.length} done</span>` : ''}
       </div>`;
-    html += `<div class="ov-list">`;
-    list.forEach(g => {
+    groupByCategory(list).forEach(group => {
+    html += `<div class="sub-group">
+      <div class="category-name">${escapeHtml(group.category)}</div>
+      <div class="ov-list" data-category="${escapeHtml(group.category)}">`;
+    group.goals.forEach(g => {
       let note;
       if (state.editingNoteId === g.id){
         note = `<textarea class="ov-note-input" id="overallNoteInput" rows="1" maxlength="600" data-oid="${g.id}" placeholder="What does this goal mean, why it matters…">${escapeHtml(g.note || '')}</textarea>`;
@@ -857,29 +919,42 @@
         <div class="ov-note-wrap">${note}</div>
       </div>`;
     });
-    html += `</div>`;
-    html += `<input class="weekly-add" id="overallInput" type="text" maxlength="140" placeholder="Add a long-term goal" />`;
-    if (overallSortable){ overallSortable.destroy(); overallSortable = null; }
+    html += `</div></div>`;
+    });
+    html += miniAddHtml('overallInput', 'Add a long-term goal', pickCategory(state.overallCategory));
+    overallSortables.forEach(s => s.destroy());
+    overallSortables = [];
     overallEl.innerHTML = html;
     overallEl.hidden = false;
 
-    const listEl = overallEl.querySelector('.ov-list');
-    if (window.Sortable && list.length > 1){
-      overallSortable = new Sortable(listEl, {
-        draggable: '.ov-item',
-        animation: 150,
-        forceFallback: true,
-        fallbackTolerance: 4,
-        delay: 200,
-        delayOnTouchOnly: true,
-        filter: '.ov-check, .ov-del, .goal-edit-input, .ov-note-input, .ov-note-add',
-        preventOnFilter: false,
-        onEnd: async () => {
-          const byId = new Map(state.overall.map(g => [g.id, g]));
-          state.overall = [...listEl.querySelectorAll('.ov-item')].map(el => byId.get(el.getAttribute('data-oid'))).filter(Boolean);
-          await saveOverall();
-          renderOverall();
-        }
+    if (window.Sortable){
+      overallEl.querySelectorAll('.ov-list').forEach(listEl => {
+        overallSortables.push(new Sortable(listEl, {
+          group: 'overall',
+          draggable: '.ov-item',
+          animation: 150,
+          forceFallback: true,
+          fallbackTolerance: 4,
+          delay: 200,
+          delayOnTouchOnly: true,
+          filter: '.ov-check, .ov-del, .goal-edit-input, .ov-note-input, .ov-note-add',
+          preventOnFilter: false,
+          onEnd: async () => {
+            // Dropping into another category's list moves the goal to that category.
+            const byId = new Map(state.overall.map(g => [g.id, g]));
+            const reordered = [];
+            overallEl.querySelectorAll('.ov-list').forEach(l => {
+              const category = l.getAttribute('data-category');
+              l.querySelectorAll('.ov-item').forEach(el => {
+                const g = byId.get(el.getAttribute('data-oid'));
+                if (g){ g.category = category; reordered.push(g); }
+              });
+            });
+            state.overall = reordered;
+            await saveOverall();
+            renderOverall();
+          }
+        }));
       });
     }
 
@@ -936,6 +1011,7 @@
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') addOverall(input.value);
     });
+    wireMiniAdd(input, cat => { state.overallCategory = cat; });
   }
 
   async function init(){
@@ -996,7 +1072,7 @@
   async function addWeekly(text){
     const trimmed = text.trim();
     if (!trimmed) return;
-    state.week.weekly.push({ id: uid(), text: trimmed, done: false });
+    state.week.weekly.push({ id: uid(), text: trimmed, done: false, category: pickCategory(state.weeklyCategory) });
     await saveWeek();
     render();
     const inp = document.getElementById('weeklyInput');
@@ -1071,6 +1147,7 @@
     state.addingCategory = false;
     await saveCategories();
     render();
+    renderOverall();
   }
 
   function groupByCategory(list){
@@ -1105,14 +1182,18 @@
       <button class="nav-btn" id="nextWeek" aria-label="Next week">›</button>
     </div>`;
     const weekly = state.week.weekly;
+    fillCategories(weekly);
     const wkDone = weekly.filter(g => g.done).length;
     html += `<section class="weekly">
       <div class="weekly-head">
         <span class="weekly-title">This week goals</span>
         ${weekly.length ? `<span class="weekly-count ${wkDone===weekly.length?'all-done':''}">${wkDone}/${weekly.length} done</span>` : ''}
       </div>`;
-    html += `<div class="wk-list">`;
-    weekly.forEach(g => {
+    groupByCategory(weekly).forEach(group => {
+    html += `<div class="sub-group">
+      <div class="category-name">${escapeHtml(group.category)}</div>
+      <div class="wk-list" data-category="${escapeHtml(group.category)}">`;
+    group.goals.forEach(g => {
       html += `<div class="goal-row weekly-row wk-item" data-wid="${g.id}">
         <button class="goal-check wk-check ${g.done?'checked':''}" data-wid="${g.id}" aria-label="${g.done?'Mark not done':'Mark done'}"></button>
         ${state.editingWeeklyId===g.id
@@ -1121,9 +1202,10 @@
         <button class="goal-del wk-del" data-wid="${g.id}" aria-label="Delete weekly goal">✕</button>
       </div>`;
     });
-    html += `</div>`;
-    html += `<input class="weekly-add" id="weeklyInput" type="text" maxlength="140" placeholder="Add a goal for the whole week" />
-    </section>`;
+    html += `</div></div>`;
+    });
+    html += miniAddHtml('weeklyInput', 'Add a goal for the whole week', pickCategory(state.weeklyCategory));
+    html += `</section>`;
 
     html += `<div class="tabs">
       <button class="tab ${isWeekday?'active':''}" data-tab="weekday">
@@ -1251,9 +1333,9 @@
       }));
     });
 
-    const wkList = document.querySelector('.wk-list');
-    if (wkList && state.week.weekly.length > 1){
+    document.querySelectorAll('.wk-list').forEach(wkList => {
       sortables.push(new Sortable(wkList, {
+        group: 'weekly',
         draggable: '.wk-item',
         animation: 150,
         forceFallback: true,
@@ -1263,13 +1345,22 @@
         filter: '.wk-check, .wk-del, .goal-edit-input',
         preventOnFilter: false,
         onEnd: async () => {
+          // Dropping into another category's list moves the goal to that category.
           const byId = new Map(state.week.weekly.map(g => [g.id, g]));
-          state.week.weekly = [...wkList.querySelectorAll('.wk-item')].map(el => byId.get(el.getAttribute('data-wid'))).filter(Boolean);
+          const reordered = [];
+          document.querySelectorAll('.wk-list').forEach(l => {
+            const category = l.getAttribute('data-category');
+            l.querySelectorAll('.wk-item').forEach(el => {
+              const g = byId.get(el.getAttribute('data-wid'));
+              if (g){ g.category = category; reordered.push(g); }
+            });
+          });
+          state.week.weekly = reordered;
           await saveWeek();
           render();
         }
       }));
-    }
+    });
   }
 
   function renderChips(){
@@ -1404,6 +1495,7 @@
     weeklyInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') addWeekly(weeklyInput.value);
     });
+    wireMiniAdd(weeklyInput, cat => { state.weeklyCategory = cat; });
 
     const input = document.getElementById('goalInput');
     const addBtn = document.getElementById('addBtn');

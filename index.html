@@ -387,6 +387,10 @@
   }
   .move-day:hover:not(:disabled){ border-color: var(--ink-soft); color: var(--ink); }
   .move-day:disabled{ opacity: .35; cursor:default; }
+  .repeat-day.on{ border-color: var(--ink); color: var(--ink); font-weight: 600; }
+  .repeat-day.on:disabled{ opacity: .6; }
+  .repeat-start, .repeat-stop{ border-style: dashed; }
+  .goal-move.repeat{ color: var(--ink); }
 
   .empty-state{
     color: var(--ink-soft);
@@ -727,6 +731,7 @@
     overall: [],
     editingOverallId: null,
     editingNoteId: null,
+    routines: [],
     weeklyCategory: null,
     overallCategory: null,
     addingCategory: false,
@@ -759,11 +764,12 @@
           weekday: withDays(parsed.weekday, 'weekday'),
           weekend: withDays(parsed.weekend, 'weekend'),
           weekly: parsed.weekly || [],
+          routineDone: parsed.routineDone || [],
           copyDismissed: !!parsed.copyDismissed
         };
       }
     }catch(e){ /* no data for this week yet */ }
-    return { weekday: [], weekend: [], weekly: [], copyDismissed: false };
+    return { weekday: [], weekend: [], weekly: [], routineDone: [], copyDismissed: false };
   }
 
   function isEmptyWeek(w){
@@ -811,7 +817,7 @@
   }
 
   async function addOverall(text){
-    const trimmed = text.trim();
+    const trimmed = capFirst(text.trim());
     if (!trimmed) return;
     state.overall.push({ id: uid(), text: trimmed, done: false, category: pickCategory(state.overallCategory) });
     await saveOverall();
@@ -1015,11 +1021,13 @@
   }
 
   async function init(){
-    const [week, categories, overall] = await Promise.all([
+    const [week, categories, overall, routines] = await Promise.all([
       loadWeek(state.monday),
       loadCategories(),
-      loadOverall()
+      loadOverall(),
+      loadRoutines()
     ]);
+    state.routines = routines;
     state.week = week;
     state.categories = categories;
     state.overall = overall;
@@ -1070,7 +1078,7 @@
   }
 
   async function addWeekly(text){
-    const trimmed = text.trim();
+    const trimmed = capFirst(text.trim());
     if (!trimmed) return;
     state.week.weekly.push({ id: uid(), text: trimmed, done: false, category: pickCategory(state.weeklyCategory) });
     await saveWeek();
@@ -1099,8 +1107,10 @@
     render();
   }
 
+  function capFirst(s){ return s.replace(/^\p{Ll}/u, c => c.toUpperCase()); }
+
   async function addGoal(text){
-    const trimmed = text.trim();
+    const trimmed = capFirst(text.trim());
     if (!trimmed) return;
     state.week[state.activeTab].push({
       id: uid(), text: trimmed, category: state.selectedCategory, done: false,
@@ -1110,7 +1120,55 @@
     render();
   }
 
+  const ALL_DAYS = [...DAYS.weekday, ...DAYS.weekend];
+
+  async function loadRoutines(){
+    try{
+      const res = await window.storage.get('goals-routines', false);
+      if (res && res.value){
+        const arr = JSON.parse(res.value);
+        if (Array.isArray(arr)) return arr;
+      }
+    }catch(e){ /* none yet */ }
+    return [];
+  }
+
+  async function saveRoutines(){
+    try{
+      await window.storage.set('goals-routines', JSON.stringify(state.routines), false);
+    }catch(e){ console.error('Storage error saving repeating goals', e); }
+  }
+
+  function routineKey(rid, day){ return rid + '|' + day; }
+  function isRoutineId(id){ return id.startsWith('r:'); }
+  function routineById(id){ return state.routines.find(r => 'r:' + r.id === id); }
+
+  // A day's goals: repeating goals scheduled on it (from the week each was
+  // created onward, so older weeks don't suddenly show them unticked) followed
+  // by that day's one-off goals. Repeating goals keep their ticks per week in
+  // week.routineDone.
+  function goalsFor(tab, day){
+    const wk = isoDate(state.monday);
+    const doneSet = new Set(state.week.routineDone || []);
+    const repeating = state.routines
+      .filter(r => r.days.includes(day) && r.since <= wk)
+      .map(r => ({ id: 'r:' + r.id, text: r.text, category: r.category, day,
+                   done: doneSet.has(routineKey(r.id, day)), routine: true, days: r.days }));
+    return [...repeating, ...state.week[tab].filter(g => g.day === day)];
+  }
+
   async function toggleGoal(id){
+    if (isRoutineId(id)){
+      const r = routineById(id);
+      if (!r) return;
+      const key = routineKey(r.id, state.selectedDay[state.activeTab]);
+      const done = new Set(state.week.routineDone || []);
+      if (done.has(key)) done.delete(key); else done.add(key);
+      state.week.routineDone = [...done];
+      await saveWeek();
+      render();
+      return;
+    }
     const list = state.week[state.activeTab];
     const g = list.find(x => x.id === id);
     if (g){ g.done = !g.done; await saveWeek(); render(); }
@@ -1118,10 +1176,56 @@
 
   async function saveGoalText(id, text){
     const trimmed = text.trim();
+    state.editingGoalId = null;
+    if (isRoutineId(id)){
+      const r = routineById(id);
+      if (r && trimmed){ r.text = trimmed; await saveRoutines(); }
+      render();
+      return;
+    }
     const g = state.week[state.activeTab].find(x => x.id === id);
     if (g && trimmed) g.text = trimmed;
-    state.editingGoalId = null;
     if (g && trimmed) await saveWeek();
+    render();
+  }
+
+  async function makeRepeating(id){
+    const tab = state.activeTab;
+    const g = state.week[tab].find(x => x.id === id);
+    if (!g) return;
+    const r = { id: uid(), text: g.text, category: g.category, days: [g.day], since: isoDate(state.monday) };
+    state.routines.push(r);
+    state.week[tab] = state.week[tab].filter(x => x.id !== id);
+    if (g.done) state.week.routineDone = [...(state.week.routineDone || []), routineKey(r.id, g.day)];
+    // Keep the panel open on the new repeating goal so its days can be picked straight away.
+    state.movingGoalId = 'r:' + r.id;
+    await Promise.all([saveRoutines(), saveWeek()]);
+    render();
+  }
+
+  async function toggleRoutineDay(id, day){
+    const r = routineById(id);
+    if (!r) return;
+    if (r.days.includes(day)){
+      if (r.days.length === 1) return;
+      r.days = r.days.filter(d => d !== day);
+    } else {
+      r.days = ALL_DAYS.filter(d => r.days.includes(d) || d === day);
+    }
+    await saveRoutines();
+    render();
+  }
+
+  // Turns a repeating goal back into a one-off goal on the day being viewed.
+  async function stopRepeating(id){
+    const r = routineById(id);
+    if (!r) return;
+    const tab = state.activeTab, day = state.selectedDay[tab];
+    const done = (state.week.routineDone || []).includes(routineKey(r.id, day));
+    state.routines = state.routines.filter(x => x !== r);
+    state.week[tab].push({ id: uid(), text: r.text, category: r.category, done, day });
+    state.movingGoalId = null;
+    await Promise.all([saveRoutines(), saveWeek()]);
     render();
   }
 
@@ -1134,6 +1238,14 @@
   }
 
   async function deleteGoal(id){
+    if (isRoutineId(id)){
+      const r = routineById(id);
+      if (!r || !confirm(`Delete "${r.text}" from every day it repeats on?`)) return;
+      state.routines = state.routines.filter(x => x !== r);
+      await saveRoutines();
+      render();
+      return;
+    }
     state.week[state.activeTab] = state.week[state.activeTab].filter(x => x.id !== id);
     await saveWeek();
     render();
@@ -1167,13 +1279,19 @@
     }
     const isWeekday = state.activeTab === 'weekday';
     const activeDay = state.selectedDay[state.activeTab];
-    const list = state.week[state.activeTab].filter(g => g.day === activeDay);
+    const list = goalsFor(state.activeTab, activeDay);
     const done = list.filter(g => g.done).length;
     const total = list.length;
     const pct = total ? Math.round((done/total)*100) : 0;
 
-    const wdDone = state.week.weekday.filter(g=>g.done).length, wdTotal = state.week.weekday.length;
-    const weDone = state.week.weekend.filter(g=>g.done).length, weTotal = state.week.weekend.length;
+    const tabStats = tab => DAYS[tab].reduce((acc, d) => {
+      const gs = goalsFor(tab, d);
+      acc.done += gs.filter(g => g.done).length;
+      acc.total += gs.length;
+      return acc;
+    }, { done: 0, total: 0 });
+    const wd = tabStats('weekday'), we = tabStats('weekend');
+    const wdDone = wd.done, wdTotal = wd.total, weDone = we.done, weTotal = we.total;
 
     let html = '';
     html += `<div class="header">
@@ -1220,7 +1338,7 @@
 
     html += `<div class="day-row">`;
     DAYS[state.activeTab].forEach(day => {
-      const dayGoals = state.week[state.activeTab].filter(g => g.day === day);
+      const dayGoals = goalsFor(state.activeTab, day);
       const dDone = dayGoals.filter(g => g.done).length;
       const allDone = dayGoals.length > 0 && dDone === dayGoals.length;
       html += `<button class="day-btn ${day===activeDay?'active '+state.activeTab:''}" data-day="${escapeHtml(day)}">
@@ -1253,21 +1371,30 @@
           <div class="category-name">${escapeHtml(group.category)}</div>
           <div class="goal-list" data-category="${escapeHtml(group.category)}">`;
         group.goals.forEach(g => {
-          html += `<div class="goal-item" data-id="${g.id}">
+          html += `<div class="goal-item ${g.routine?'routine-item':''}" data-id="${g.id}">
             <div class="goal-row">
               <button class="goal-check ${g.done?'checked':''}" data-id="${g.id}" aria-label="${g.done?'Mark not done':'Mark done'}"></button>
               ${state.editingGoalId===g.id
                 ? `<input class="goal-edit-input" id="editInput" type="text" maxlength="140" value="${escapeHtml(g.text)}" data-id="${g.id}" />`
                 : `<span class="goal-text ${g.done?'done':''}" data-id="${g.id}" title="Click to edit">${escapeHtml(g.text)}</span>`}
-              <button class="goal-move ${state.movingGoalId===g.id?'open':''}" data-id="${g.id}" aria-label="Move to another day">⇄</button>
+              ${g.routine
+                ? `<button class="goal-move repeat ${state.movingGoalId===g.id?'open':''}" data-id="${g.id}" aria-label="Repeat settings" title="Repeats — click to change days">↻</button>`
+                : `<button class="goal-move ${state.movingGoalId===g.id?'open':''}" data-id="${g.id}" aria-label="Move or repeat">⇄</button>`}
               <button class="goal-del" data-id="${g.id}" aria-label="Delete goal">✕</button>
             </div>`;
-          if (state.movingGoalId === g.id){
+          if (state.movingGoalId === g.id && g.routine){
+            html += `<div class="move-row"><span class="move-label">Repeats on</span>`;
+            ALL_DAYS.forEach(d => {
+              const on = g.days.includes(d);
+              html += `<button class="move-day repeat-day ${on?'on':''}" data-id="${g.id}" data-target="${escapeHtml(d)}" ${on && g.days.length===1?'disabled':''}>${escapeHtml(d)}</button>`;
+            });
+            html += `<button class="move-day repeat-stop" data-id="${g.id}">Stop repeating</button></div>`;
+          } else if (state.movingGoalId === g.id){
             html += `<div class="move-row"><span class="move-label">Move to</span>`;
             DAYS[state.activeTab].forEach(d => {
               html += `<button class="move-day" data-id="${g.id}" data-target="${escapeHtml(d)}" ${d===g.day?'disabled':''}>${escapeHtml(d)}</button>`;
             });
-            html += `</div>`;
+            html += `<button class="move-day repeat-start" data-id="${g.id}">↻ Repeat</button></div>`;
           }
           html += `</div>`;
         });
@@ -1327,7 +1454,9 @@
         // Touch needs a long-press, otherwise a drag would hijack page scrolling.
         delay: 200,
         delayOnTouchOnly: true,
-        filter: '.goal-check, .goal-del, .goal-move, .move-row, .goal-edit-input',
+        // Repeating goals are rebuilt from their schedule on every render, so
+        // they can't be dragged into a day's order.
+        filter: '.goal-check, .goal-del, .goal-move, .move-row, .goal-edit-input, .routine-item',
         preventOnFilter: false,
         onEnd: applyDragOrder
       }));
@@ -1437,8 +1566,17 @@
         render();
       });
     });
-    document.querySelectorAll('.move-day').forEach(el => {
+    document.querySelectorAll('.move-day:not(.repeat-day):not(.repeat-start):not(.repeat-stop)').forEach(el => {
       el.addEventListener('click', () => moveGoal(el.getAttribute('data-id'), el.getAttribute('data-target')));
+    });
+    document.querySelectorAll('.repeat-start').forEach(el => {
+      el.addEventListener('click', () => makeRepeating(el.getAttribute('data-id')));
+    });
+    document.querySelectorAll('.repeat-day').forEach(el => {
+      el.addEventListener('click', () => toggleRoutineDay(el.getAttribute('data-id'), el.getAttribute('data-target')));
+    });
+    document.querySelectorAll('.repeat-stop').forEach(el => {
+      el.addEventListener('click', () => stopRepeating(el.getAttribute('data-id')));
     });
 
     document.querySelectorAll('.goal-list .goal-check').forEach(el => {

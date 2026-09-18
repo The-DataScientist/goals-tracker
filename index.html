@@ -387,10 +387,13 @@
   }
   .move-day:hover:not(:disabled){ border-color: var(--ink-soft); color: var(--ink); }
   .move-day:disabled{ opacity: .35; cursor:default; }
-  .repeat-day.on{ border-color: var(--ink); color: var(--ink); font-weight: 600; }
-  .repeat-day.on:disabled{ opacity: .6; }
-  .repeat-start, .repeat-stop{ border-style: dashed; }
+  .repeat-day.on, .repeat-pick.on{ border-color: var(--ink); color: var(--ink); font-weight: 600; }
+  .repeat-day.on:disabled, .repeat-pick.on:disabled{ opacity: .6; }
+  .repeat-stop{ border-style: dashed; }
+  .move-row + .move-row{ padding-top: 0; }
   .goal-move.repeat{ color: var(--ink); }
+  /* ↻ draws noticeably smaller than ✕ at the same font size. */
+  .goal-move{ font-size: 19px; }
 
   .empty-state{
     color: var(--ink-soft);
@@ -832,7 +835,7 @@
   }
 
   async function saveOverallText(id, text){
-    const trimmed = text.trim();
+    const trimmed = capFirst(text.trim());
     const g = state.overall.find(x => x.id === id);
     if (g && trimmed) g.text = trimmed;
     state.editingOverallId = null;
@@ -1093,7 +1096,7 @@
   }
 
   async function saveWeeklyText(id, text){
-    const trimmed = text.trim();
+    const trimmed = capFirst(text.trim());
     const g = state.week.weekly.find(x => x.id === id);
     if (g && trimmed) g.text = trimmed;
     state.editingWeeklyId = null;
@@ -1107,7 +1110,7 @@
     render();
   }
 
-  function capFirst(s){ return s.replace(/^\p{Ll}/u, c => c.toUpperCase()); }
+  function capFirst(s){ return s.charAt(0).toLocaleUpperCase() + s.slice(1); }
 
   async function addGoal(text){
     const trimmed = capFirst(text.trim());
@@ -1175,7 +1178,7 @@
   }
 
   async function saveGoalText(id, text){
-    const trimmed = text.trim();
+    const trimmed = capFirst(text.trim());
     state.editingGoalId = null;
     if (isRoutineId(id)){
       const r = routineById(id);
@@ -1189,11 +1192,12 @@
     render();
   }
 
-  async function makeRepeating(id){
+  async function makeRepeating(id, extraDay){
     const tab = state.activeTab;
     const g = state.week[tab].find(x => x.id === id);
     if (!g) return;
-    const r = { id: uid(), text: g.text, category: g.category, days: [g.day], since: isoDate(state.monday) };
+    const days = ALL_DAYS.filter(d => d === g.day || d === extraDay);
+    const r = { id: uid(), text: g.text, category: g.category, days, since: isoDate(state.monday) };
     state.routines.push(r);
     state.week[tab] = state.week[tab].filter(x => x.id !== id);
     if (g.done) state.week.routineDone = [...(state.week.routineDone || []), routineKey(r.id, g.day)];
@@ -1379,7 +1383,7 @@
                 : `<span class="goal-text ${g.done?'done':''}" data-id="${g.id}" title="Click to edit">${escapeHtml(g.text)}</span>`}
               ${g.routine
                 ? `<button class="goal-move repeat ${state.movingGoalId===g.id?'open':''}" data-id="${g.id}" aria-label="Repeat settings" title="Repeats — click to change days">↻</button>`
-                : `<button class="goal-move ${state.movingGoalId===g.id?'open':''}" data-id="${g.id}" aria-label="Move or repeat">⇄</button>`}
+                : `<button class="goal-move ${state.movingGoalId===g.id?'open':''}" data-id="${g.id}" aria-label="Repeat or move" title="Repeat or move">↻</button>`}
               <button class="goal-del" data-id="${g.id}" aria-label="Delete goal">✕</button>
             </div>`;
           if (state.movingGoalId === g.id && g.routine){
@@ -1390,11 +1394,16 @@
             });
             html += `<button class="move-day repeat-stop" data-id="${g.id}">Stop repeating</button></div>`;
           } else if (state.movingGoalId === g.id){
-            html += `<div class="move-row"><span class="move-label">Move to</span>`;
+            html += `<div class="move-row"><span class="move-label">Repeat on</span>`;
+            ALL_DAYS.forEach(d => {
+              const on = d === g.day;
+              html += `<button class="move-day repeat-pick ${on?'on':''}" data-id="${g.id}" data-target="${escapeHtml(d)}" ${on?'disabled':''}>${escapeHtml(d)}</button>`;
+            });
+            html += `</div><div class="move-row"><span class="move-label">Move to</span>`;
             DAYS[state.activeTab].forEach(d => {
               html += `<button class="move-day" data-id="${g.id}" data-target="${escapeHtml(d)}" ${d===g.day?'disabled':''}>${escapeHtml(d)}</button>`;
             });
-            html += `<button class="move-day repeat-start" data-id="${g.id}">↻ Repeat</button></div>`;
+            html += `</div>`;
           }
           html += `</div>`;
         });
@@ -1566,11 +1575,11 @@
         render();
       });
     });
-    document.querySelectorAll('.move-day:not(.repeat-day):not(.repeat-start):not(.repeat-stop)').forEach(el => {
+    document.querySelectorAll('.move-day:not(.repeat-day):not(.repeat-pick):not(.repeat-stop)').forEach(el => {
       el.addEventListener('click', () => moveGoal(el.getAttribute('data-id'), el.getAttribute('data-target')));
     });
-    document.querySelectorAll('.repeat-start').forEach(el => {
-      el.addEventListener('click', () => makeRepeating(el.getAttribute('data-id')));
+    document.querySelectorAll('.repeat-pick').forEach(el => {
+      el.addEventListener('click', () => makeRepeating(el.getAttribute('data-id'), el.getAttribute('data-target')));
     });
     document.querySelectorAll('.repeat-day').forEach(el => {
       el.addEventListener('click', () => toggleRoutineDay(el.getAttribute('data-id'), el.getAttribute('data-target')));

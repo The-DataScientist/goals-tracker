@@ -1418,7 +1418,7 @@
     if (ed && ed.name === cat && ed.where === where){
       return `<div class="cat-edit">
         <input class="cat-edit-input" id="catEditInput" type="text" maxlength="24" value="${escapeHtml(cat)}" data-cat="${escapeHtml(cat)}" />
-        <button type="button" class="cat-del" id="catDeleteBtn" data-cat="${escapeHtml(cat)}">Delete</button>
+        <button type="button" class="cat-del" id="catDeleteBtn" data-cat="${escapeHtml(cat)}" data-where="${where}">Delete</button>
       </div>`;
     }
     return `<button type="button" class="category-name cat-head" data-cat="${escapeHtml(cat)}" data-where="${where}" title="Click to rename or delete">${escapeHtml(cat)}</button>`;
@@ -1447,7 +1447,7 @@
     const del = root.querySelector('#catDeleteBtn');
     // Keep focus in the field so its blur (which saves the name) doesn't fire first.
     del.addEventListener('mousedown', e => e.preventDefault());
-    del.addEventListener('click', () => { settled = true; deleteCategory(del.getAttribute('data-cat')); });
+    del.addEventListener('click', () => { settled = true; clearCategoryIn(del.getAttribute('data-cat'), del.getAttribute('data-where')); });
   }
 
   // Rewrites a category name on every goal that uses it: the loaded week,
@@ -1500,17 +1500,57 @@
       rerenderAll();
       return;
     }
-    // Removes the category from the list and its one-off goals on the day being
-    // viewed only. Goals elsewhere keep the name and still show under it.
-    const tab = state.activeTab, day = state.selectedDay[tab];
+    // From the category list: the category leaves the list, and its goals on
+    // the viewed day go with it. Goals elsewhere keep the name and still show.
+    const day = state.selectedDay[state.activeTab];
     if (!confirm(`Delete the "${name}" category and its goals on ${day}?`)){ rerenderAll(); return; }
     state.categories = state.categories.filter(c => c !== name);
     ['selectedCategory', 'weeklyCategory', 'overallCategory'].forEach(k => {
       if (state[k] === name) state[k] = state.categories[0];
     });
-    state.week[tab] = state.week[tab].filter(g => !(g.day === day && g.category === name));
+    const routinesChanged = removeDayGoals(name);
     rerenderAll();
-    await Promise.all([saveWeek(), saveCategories()]);
+    await Promise.all([saveWeek(), saveCategories(), routinesChanged ? saveRoutines() : null]);
+  }
+
+  // Deletes a category's goals on the viewed day. A repeating goal in it stops
+  // repeating on that weekday, otherwise it would put the group straight back.
+  // Returns whether any repeating goal changed.
+  function removeDayGoals(name){
+    const tab = state.activeTab, day = state.selectedDay[tab];
+    state.week[tab] = state.week[tab].filter(g => !(g.day === day && g.category === name));
+    let changed = false;
+    state.routines = state.routines.flatMap(r => {
+      if (r.category !== name || !r.days.includes(day)) return [r];
+      changed = true;
+      const days = r.days.filter(d => d !== day);
+      return days.length ? [{ ...r, days }] : [];
+    });
+    return changed;
+  }
+
+  // From a list's category heading: empties that group in that list only and
+  // keeps the category (for the daily list, on the viewed day only).
+  async function clearCategoryIn(name, where){
+    state.editingCategory = null;
+    const day = state.selectedDay[state.activeTab];
+    const what = where === 'daily' ? `on ${day}` : where === 'weekly' ? `in this week's goals` : `in your overall goals`;
+    if (!confirm(`Delete all the "${name}" goals ${what}?`)){ rerenderAll(); return; }
+    if (where === 'weekly'){
+      state.week.weekly = state.week.weekly.filter(g => g.category !== name);
+      rerenderAll();
+      await saveWeek();
+      return;
+    }
+    if (where === 'overall'){
+      state.overall = state.overall.filter(g => g.category !== name);
+      rerenderAll();
+      await saveOverall();
+      return;
+    }
+    const routinesChanged = removeDayGoals(name);
+    rerenderAll();
+    await Promise.all([saveWeek(), routinesChanged ? saveRoutines() : null]);
   }
 
   function render(){

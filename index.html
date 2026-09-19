@@ -292,6 +292,47 @@
     color: var(--ink-soft);
     margin-bottom: 6px;
   }
+  .cat-head{
+    display: block;
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: 'Libre Franklin', sans-serif;
+    text-align: left;
+    cursor: pointer;
+  }
+  .cat-head:hover{ color: var(--ink); }
+  .cat-head:focus-visible{ outline: 2px solid var(--ink); outline-offset: 2px; }
+  .cat-edit{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .cat-edit-input{
+    flex: 1;
+    min-width: 0;
+    font-family: 'Libre Franklin', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    background: none;
+    border: none;
+    border-bottom: 1.5px solid var(--ink);
+    padding: 2px 0;
+  }
+  .cat-edit-input:focus{ outline: none; }
+  .cat-del{
+    background: none;
+    border: 1px solid var(--weekend);
+    color: var(--weekend);
+    border-radius: 12px;
+    padding: 3px 10px;
+    font-family: 'Libre Franklin', sans-serif;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .cat-del:hover{ background: var(--weekend-soft); }
   .goal-row{
     display:flex;
     align-items:flex-start;
@@ -803,6 +844,31 @@
     }catch(e){ console.error('Storage error saving categories', e); }
   }
 
+  // Sorts the existing categories into the requested order once; after that,
+  // the order set by dragging the category chips is left alone.
+  const PREFERRED_ORDER = ['work', 'fitness', 'personal', 'todo', 'needs'];
+  async function applyPreferredOrderOnce(){
+    let prefs = {};
+    try{
+      const res = await window.storage.get('goals-prefs', false);
+      prefs = JSON.parse(res.value) || {};
+    }catch(e){ /* first run */ }
+    if (prefs.categoryOrderV1) return;
+    const norm = s => s.toLowerCase().replace(/[^a-z]/g, '');
+    const rank = c => {
+      const i = PREFERRED_ORDER.indexOf(norm(c));
+      return i < 0 ? PREFERRED_ORDER.length : i;
+    };
+    state.categories = state.categories
+      .map((c, i) => ({ c, i }))
+      .sort((a, b) => rank(a.c) - rank(b.c) || a.i - b.i)
+      .map(x => x.c);
+    prefs.categoryOrderV1 = true;
+    try{
+      await Promise.all([saveCategories(), window.storage.set('goals-prefs', JSON.stringify(prefs), false)]);
+    }catch(e){ console.error('Storage error saving preferences', e); }
+  }
+
   async function loadOverall(){
     try{
       const res = await window.storage.get('goals-overall', false);
@@ -907,7 +973,7 @@
       </div>`;
     groupByCategory(list).forEach(group => {
     html += `<div class="sub-group">
-      <div class="category-name">${escapeHtml(group.category)}</div>
+      ${categoryHeading(group.category, 'overall')}
       <div class="ov-list" data-category="${escapeHtml(group.category)}">`;
     group.goals.forEach(g => {
       let note;
@@ -1022,6 +1088,7 @@
       if (e.key === 'Enter') addOverall(input.value);
     });
     wireMiniAdd(input, cat => { state.overallCategory = cat; });
+    wireCategoryHeads(overallEl);
   }
 
   async function init(){
@@ -1036,9 +1103,10 @@
     state.dayOrder = dayOrder;
     state.week = week;
     state.categories = categories;
+    await applyPreferredOrderOnce();
     state.overall = overall;
     renderOverall();
-    state.selectedCategory = categories[0];
+    state.selectedCategory = state.categories[0];
 
     const prevMonday = new Date(state.monday); prevMonday.setDate(prevMonday.getDate()-7);
     if (isEmptyWeek(week) && !week.copyDismissed){
@@ -1285,7 +1353,7 @@
   }
 
   async function addCategory(name){
-    const trimmed = name.trim();
+    const trimmed = capFirst(name.trim());
     if (!trimmed) return;
     if (!state.categories.includes(trimmed)) state.categories.push(trimmed);
     state.selectedCategory = trimmed;
@@ -1295,6 +1363,8 @@
     renderOverall();
   }
 
+  // Groups follow the category list's order; a category missing from the list
+  // (shouldn't happen, but old data could have one) goes last.
   function groupByCategory(list){
     const groups = {};
     const order = [];
@@ -1302,7 +1372,106 @@
       if (!groups[g.category]){ groups[g.category] = []; order.push(g.category); }
       groups[g.category].push(g);
     });
+    const rank = new Map(order.map((c, i) => {
+      const idx = state.categories.indexOf(c);
+      return [c, idx < 0 ? state.categories.length + i : idx];
+    }));
+    order.sort((a, b) => rank.get(a) - rank.get(b));
     return order.map(cat => ({ category: cat, goals: groups[cat] }));
+  }
+
+  // Category headings double as the rename/delete control. `where` tells the
+  // three lists apart so only the heading that was clicked turns into a field.
+  function categoryHeading(cat, where){
+    const ed = state.editingCategory;
+    if (ed && ed.name === cat && ed.where === where){
+      return `<div class="cat-edit">
+        <input class="cat-edit-input" id="catEditInput" type="text" maxlength="24" value="${escapeHtml(cat)}" data-cat="${escapeHtml(cat)}" />
+        <button type="button" class="cat-del" id="catDeleteBtn" data-cat="${escapeHtml(cat)}">Delete</button>
+      </div>`;
+    }
+    return `<button type="button" class="category-name cat-head" data-cat="${escapeHtml(cat)}" data-where="${where}" title="Click to rename or delete">${escapeHtml(cat)}</button>`;
+  }
+
+  function rerenderAll(){ render(); renderOverall(); }
+
+  function wireCategoryHeads(root){
+    root.querySelectorAll('.cat-head').forEach(el => {
+      el.addEventListener('click', () => {
+        state.editingCategory = { name: el.getAttribute('data-cat'), where: el.getAttribute('data-where') };
+        rerenderAll();
+        const inp = document.getElementById('catEditInput');
+        if (inp){ inp.focus(); inp.select(); }
+      });
+    });
+    const inp = root.querySelector('#catEditInput');
+    if (!inp) return;
+    let settled = false;
+    const commit = () => { if (!settled){ settled = true; renameCategory(inp.getAttribute('data-cat'), inp.value); } };
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') commit();
+      if (e.key === 'Escape'){ settled = true; state.editingCategory = null; rerenderAll(); }
+    });
+    inp.addEventListener('blur', commit);
+    const del = root.querySelector('#catDeleteBtn');
+    // Keep focus in the field so its blur (which saves the name) doesn't fire first.
+    del.addEventListener('mousedown', e => e.preventDefault());
+    del.addEventListener('click', () => { settled = true; deleteCategory(del.getAttribute('data-cat')); });
+  }
+
+  // Rewrites a category name on every goal that uses it: the loaded week,
+  // overall and repeating goals, and every other saved week.
+  async function recategorize(from, to){
+    const fix = list => (list || []).forEach(g => { if (g.category === from) g.category = to; });
+    fix(state.week.weekday); fix(state.week.weekend); fix(state.week.weekly);
+    fix(state.overall); fix(state.routines);
+    if (state.prevWeek){ fix(state.prevWeek.weekday); fix(state.prevWeek.weekend); fix(state.prevWeek.weekly); }
+    ['selectedCategory', 'weeklyCategory', 'overallCategory'].forEach(k => { if (state[k] === from) state[k] = to; });
+
+    const current = await weekKey(state.monday);
+    const { keys } = await window.storage.list('goals-week:');
+    await Promise.all(keys.filter(k => k !== current).map(async k => {
+      try{
+        const res = await window.storage.get(k, false);
+        const w = JSON.parse(res.value);
+        let changed = false;
+        ['weekday', 'weekend', 'weekly'].forEach(t => (w[t] || []).forEach(g => {
+          if (g.category === from){ g.category = to; changed = true; }
+        }));
+        if (changed) await window.storage.set(k, JSON.stringify(w), false);
+      }catch(e){ console.error('Could not update category in', k, e); }
+    }));
+    await Promise.all([saveWeek(), saveOverall(), saveRoutines(), saveCategories()]);
+  }
+
+  async function renameCategory(oldName, value){
+    const newName = capFirst(value.trim());
+    state.editingCategory = null;
+    if (!newName || newName === oldName){ rerenderAll(); return; }
+    if (state.categories.some(c => c !== oldName && c.toLowerCase() === newName.toLowerCase())){
+      alert(`There's already a category called "${newName}".`);
+      rerenderAll();
+      return;
+    }
+    state.categories = state.categories.map(c => c === oldName ? newName : c);
+    rerenderAll();
+    await recategorize(oldName, newName);
+    rerenderAll();
+  }
+
+  async function deleteCategory(name){
+    state.editingCategory = null;
+    const target = state.categories.find(c => c !== name);
+    if (!target){
+      alert("You need at least one category, so this one can't be deleted.");
+      rerenderAll();
+      return;
+    }
+    if (!confirm(`Delete the "${name}" category? Its goals will move to "${target}".`)){ rerenderAll(); return; }
+    state.categories = state.categories.filter(c => c !== name);
+    rerenderAll();
+    await recategorize(name, target);
+    rerenderAll();
   }
 
   function render(){
@@ -1342,7 +1511,7 @@
       </div>`;
     groupByCategory(weekly).forEach(group => {
     html += `<div class="sub-group">
-      <div class="category-name">${escapeHtml(group.category)}</div>
+      ${categoryHeading(group.category, 'weekly')}
       <div class="wk-list" data-category="${escapeHtml(group.category)}">`;
     group.goals.forEach(g => {
       html += `<div class="goal-row weekly-row wk-item" data-wid="${g.id}">
@@ -1401,7 +1570,7 @@
       const groups = groupByCategory(list);
       groups.forEach(group => {
         html += `<div class="category-group">
-          <div class="category-name">${escapeHtml(group.category)}</div>
+          ${categoryHeading(group.category, 'daily')}
           <div class="goal-list" data-category="${escapeHtml(group.category)}">`;
         group.goals.forEach(g => {
           html += `<div class="goal-item ${g.routine?'routine-item':''}" data-id="${g.id}">
@@ -1539,6 +1708,8 @@
     });
   }
 
+  let chipSortable = null;
+
   function renderChips(){
     const chipRow = document.getElementById('chipRow');
     let html = '';
@@ -1551,7 +1722,28 @@
     } else {
       html += `<button class="chip" id="newCatChip">+ New</button>`;
     }
+    if (chipSortable){ chipSortable.destroy(); chipSortable = null; }
     chipRow.innerHTML = html;
+    if (window.Sortable){
+      // Dragging the chips sets the category order used everywhere.
+      chipSortable = new Sortable(chipRow, {
+        draggable: '.chip[data-cat]',
+        animation: 150,
+        forceFallback: true,
+        fallbackTolerance: 4,
+        delay: 200,
+        delayOnTouchOnly: true,
+        filter: '#newCatChip, #newCatInput',
+        preventOnFilter: false,
+        onEnd: async () => {
+          const next = [...chipRow.querySelectorAll('.chip[data-cat]')].map(b => b.getAttribute('data-cat'));
+          if (next.join('\n') === state.categories.join('\n')) return;
+          state.categories = next;
+          await saveCategories();
+          rerenderAll();
+        }
+      });
+    }
 
     chipRow.querySelectorAll('.chip[data-cat]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -1681,6 +1873,7 @@
       if (e.key === 'Enter') addWeekly(weeklyInput.value);
     });
     wireMiniAdd(weeklyInput, cat => { state.weeklyCategory = cat; });
+    wireCategoryHeads(app);
 
     const input = document.getElementById('goalInput');
     const addBtn = document.getElementById('addBtn');

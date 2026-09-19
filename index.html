@@ -1500,37 +1500,17 @@
       rerenderAll();
       return;
     }
-    if (!confirm(`Delete the "${name}" category and all of its goals, in every week? This can't be undone.`)){ rerenderAll(); return; }
+    // Removes the category from the list and its one-off goals on the day being
+    // viewed only. Goals elsewhere keep the name and still show under it.
+    const tab = state.activeTab, day = state.selectedDay[tab];
+    if (!confirm(`Delete the "${name}" category and its goals on ${day}?`)){ rerenderAll(); return; }
     state.categories = state.categories.filter(c => c !== name);
     ['selectedCategory', 'weeklyCategory', 'overallCategory'].forEach(k => {
       if (state[k] === name) state[k] = state.categories[0];
     });
-    const keep = list => (list || []).filter(g => g.category !== name);
-    state.week.weekday = keep(state.week.weekday);
-    state.week.weekend = keep(state.week.weekend);
-    state.week.weekly = keep(state.week.weekly);
-    state.overall = keep(state.overall);
-    state.routines = keep(state.routines);
-    if (state.prevWeek){
-      state.prevWeek = { ...state.prevWeek, weekday: keep(state.prevWeek.weekday), weekend: keep(state.prevWeek.weekend), weekly: keep(state.prevWeek.weekly) };
-      if (isEmptyWeek(state.prevWeek)) state.prevWeek = null;
-    }
+    state.week[tab] = state.week[tab].filter(g => !(g.day === day && g.category === name));
     rerenderAll();
-
-    const current = await weekKey(state.monday);
-    const { keys } = await window.storage.list('goals-week:');
-    await Promise.all(keys.filter(k => k !== current).map(async k => {
-      try{
-        const res = await window.storage.get(k, false);
-        const w = JSON.parse(res.value);
-        const before = ['weekday', 'weekend', 'weekly'].reduce((n, t) => n + (w[t] || []).length, 0);
-        ['weekday', 'weekend', 'weekly'].forEach(t => { w[t] = keep(w[t]); });
-        const after = ['weekday', 'weekend', 'weekly'].reduce((n, t) => n + w[t].length, 0);
-        if (after !== before) await window.storage.set(k, JSON.stringify(w), false);
-      }catch(e){ console.error('Could not remove category goals from', k, e); }
-    }));
-    await Promise.all([saveWeek(), saveOverall(), saveRoutines(), saveCategories()]);
-    rerenderAll();
+    await Promise.all([saveWeek(), saveCategories()]);
   }
 
   function render(){

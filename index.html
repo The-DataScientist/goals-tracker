@@ -492,6 +492,36 @@
     width: 110px;
   }
   .chip-new-input:focus{ outline:none; }
+  .chip-edit{
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    border: 1.5px solid var(--ink);
+    border-radius: 20px;
+    padding: 0 4px 0 13px;
+  }
+  .chip-edit-input{
+    width: 96px;
+    border: none;
+    background: none;
+    padding: 6px 0;
+    font-family: 'Libre Franklin', sans-serif;
+    font-size: 13px;
+    color: var(--ink);
+  }
+  .chip-edit-input:focus{ outline: none; }
+  .chip-del{
+    background: none;
+    border: none;
+    color: var(--weekend);
+    font-size: 14px;
+    line-height: 1;
+    padding: 7px 9px;
+    margin: -3px -2px -3px 0;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+  .chip-del:hover{ background: var(--weekend-soft); }
   .add-submit{
     width:100%;
     border:none;
@@ -775,6 +805,7 @@
     overall: [],
     editingOverallId: null,
     editingNoteId: null,
+    editingChip: null,
     routines: [],
     dayOrder: {},
     weeklyCategory: null,
@@ -1447,6 +1478,7 @@
   async function renameCategory(oldName, value){
     const newName = capFirst(value.trim());
     state.editingCategory = null;
+    state.editingChip = null;
     if (!newName || newName === oldName){ rerenderAll(); return; }
     if (state.categories.some(c => c !== oldName && c.toLowerCase() === newName.toLowerCase())){
       alert(`There's already a category called "${newName}".`);
@@ -1454,6 +1486,7 @@
       return;
     }
     state.categories = state.categories.map(c => c === oldName ? newName : c);
+    if (state.selectedCategory === oldName) state.selectedCategory = newName;
     rerenderAll();
     await recategorize(oldName, newName);
     rerenderAll();
@@ -1461,6 +1494,7 @@
 
   async function deleteCategory(name){
     state.editingCategory = null;
+    state.editingChip = null;
     const target = state.categories.find(c => c !== name);
     if (!target){
       alert("You need at least one category, so this one can't be deleted.");
@@ -1714,8 +1748,15 @@
     const chipRow = document.getElementById('chipRow');
     let html = '';
     state.categories.forEach(cat => {
+      if (cat === state.editingChip){
+        html += `<span class="chip-edit">
+          <input class="chip-edit-input" id="chipEditInput" type="text" maxlength="24" value="${escapeHtml(cat)}" data-cat="${escapeHtml(cat)}" aria-label="Rename category" />
+          <button type="button" class="chip-del" id="chipDeleteBtn" data-cat="${escapeHtml(cat)}" aria-label="Delete category" title="Delete category">✕</button>
+        </span>`;
+        return;
+      }
       const sel = cat === state.selectedCategory && !state.addingCategory;
-      html += `<button class="chip ${sel?'selected '+state.activeTab:''}" data-cat="${escapeHtml(cat)}">${escapeHtml(cat)}</button>`;
+      html += `<button class="chip ${sel?'selected '+state.activeTab:''}" data-cat="${escapeHtml(cat)}" ${sel?'title="Click again to rename or delete"':''}>${escapeHtml(cat)}</button>`;
     });
     if (state.addingCategory){
       html += `<input class="chip-new-input" id="newCatInput" type="text" placeholder="Category name" maxlength="24" autofocus />`;
@@ -1724,7 +1765,7 @@
     }
     if (chipSortable){ chipSortable.destroy(); chipSortable = null; }
     chipRow.innerHTML = html;
-    if (window.Sortable){
+    if (window.Sortable && !state.editingChip){
       // Dragging the chips sets the category order used everywhere.
       chipSortable = new Sortable(chipRow, {
         draggable: '.chip[data-cat]',
@@ -1747,11 +1788,35 @@
 
     chipRow.querySelectorAll('.chip[data-cat]').forEach(btn => {
       btn.addEventListener('click', () => {
-        state.selectedCategory = btn.getAttribute('data-cat');
+        const cat = btn.getAttribute('data-cat');
+        // First click selects a category; clicking the selected one again edits it.
+        if (cat === state.selectedCategory && !state.addingCategory){
+          state.editingChip = cat;
+          render();
+          const inp = document.getElementById('chipEditInput');
+          if (inp){ inp.focus(); inp.select(); }
+          return;
+        }
+        state.selectedCategory = cat;
         state.addingCategory = false;
         render();
       });
     });
+
+    const chipEdit = document.getElementById('chipEditInput');
+    if (chipEdit){
+      let settled = false;
+      const commit = () => { if (!settled){ settled = true; renameCategory(chipEdit.getAttribute('data-cat'), chipEdit.value); } };
+      chipEdit.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') commit();
+        if (e.key === 'Escape'){ settled = true; state.editingChip = null; render(); }
+      });
+      chipEdit.addEventListener('blur', commit);
+      const del = document.getElementById('chipDeleteBtn');
+      // Keep focus in the field so its blur (which saves the name) doesn't fire first.
+      del.addEventListener('mousedown', e => e.preventDefault());
+      del.addEventListener('click', () => { settled = true; deleteCategory(del.getAttribute('data-cat')); });
+    }
     const newChip = document.getElementById('newCatChip');
     if (newChip) newChip.addEventListener('click', () => {
       state.addingCategory = true;
